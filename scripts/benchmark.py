@@ -169,11 +169,12 @@ def bench_scan(scan_n: int, results: dict) -> None:
     db.close()
 
 
-def bench_real(real_n: int, results: dict) -> None:
+def bench_real(real_n: int, results: dict, px: int = 128) -> None:
     """실제 이미지로 dedup(파일 해시)·analyze(디코드+썸네일)·bestshot 비용 실측.
 
     합성 DB로는 잴 수 없는 I/O 바운드 단계를 소규모로 재고 per-item 비용을
-    100k로 외삽한다(workers=1 single-process 기준). 실제 네트워크 드라이브는
+    100k로 외삽한다(workers=1 single-process 기준). ``px``로 이미지 한 변을 키우면
+    실제 사진(12~50MP)에 가까운 디코드/썸네일 비용을 잰다. 실제 네트워크 드라이브는
     I/O 지연이 더해지고, analyze/dedup은 CPU 바운드라 멀티프로세싱으로 ~1/W 가능.
     """
     if real_n <= 0:
@@ -185,20 +186,22 @@ def bench_real(real_n: int, results: dict) -> None:
     tmp = tempfile.mkdtemp(prefix="poreal_")
     root = os.path.join(tmp, "photos")
     os.makedirs(root)
-    print(f"\n[실이미지 I/O — base {real_n:,}장 + 근사/완전중복, 실제 파이프라인 workers=1]")
+    mp = px * px / 1_000_000
+    print(f"\n[실이미지 I/O — base {real_n:,}장 @ {px}x{px}(~{mp:.1f}MP) "
+          f"+ 근사/완전중복, 실제 파이프라인 workers=1]")
 
     paths = []
     with _timed("generate real jpegs (setup)", results):
         for i in range(real_n):
-            img = Image.frombytes("RGB", (128, 128), os.urandom(128 * 128 * 3))
+            img = Image.frombytes("RGB", (px, px), os.urandom(px * px * 3))
             p = os.path.join(root, f"img{i:06d}.jpg")
             img.save(p, "JPEG", quality=85)
-            paths.append((p, img))
             if i % 10 == 0:  # 10%: 근사중복 2장(재인코딩 → pHash 근접 → 유사 그룹)
                 for q in (70, 55):
                     img.save(os.path.join(root, f"img{i:06d}_v{q}.jpg"), "JPEG", quality=q)
+            paths.append(p)  # 경로만 보관(큰 이미지 객체를 메모리에 붙잡지 않음)
         for i in range(0, real_n // 7):  # ~15%: 완전중복(dedup 대상)
-            shutil.copy(paths[i][0], os.path.join(root, f"dup{i:06d}.jpg"))
+            shutil.copy(paths[i], os.path.join(root, f"dup{i:06d}.jpg"))
 
     db = Database(os.path.join(tmp, "real.db"))
     thumb_dir = os.path.join(tmp, "thumbs")
@@ -240,6 +243,7 @@ def main() -> int:
     ap.add_argument("--n", type=int, default=100_000, help="합성 DB 행 수 (0=생략)")
     ap.add_argument("--scan-n", type=int, default=100_000, help="스캔용 빈 파일 수 (0=생략)")
     ap.add_argument("--real-n", type=int, default=0, help="실이미지 base 장수 (0=생략)")
+    ap.add_argument("--real-size", type=int, default=128, help="실이미지 한 변 px (기본 128)")
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
     random.seed(args.seed)
@@ -252,7 +256,7 @@ def main() -> int:
     if args.n > 0:
         bench_algorithms(args.n, results)
     bench_scan(args.scan_n, results)
-    bench_real(args.real_n, results)
+    bench_real(args.real_n, results, px=args.real_size)
     print(f"\n총 소요: {time.perf_counter() - t0:.1f}s, 최종 피크 RSS {_rss_mb():.1f} MB")
     return 0
 

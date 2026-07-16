@@ -90,11 +90,13 @@ scan(디스커버리) → dedup(완전중복: 크기→빠른해시→SHA-256)
 - [x] **10만 장 성능/부하 테스트**: `scripts/benchmark.py`(하이브리드 — 알고리즘은 합성 DB 100k, scan은 빈 파일 100k).
       결과(macOS py3.14): scan 0.84s · 재스캔/삭제감지 ~0.7s · protected_survivors 0.09s · report 0.09s · DB 19MB · 피크 RSS 123MB — 모두 우수.
       **병목이던 유사 클러스터링을 BK-tree→멀티인덱스 해싱으로 교체해 524s→1.6s(약 330배, 결과 불변).**
-      I/O 단계는 `--real-n`으로 실이미지 실측+외삽(2685파일, 128px, single-process): dedup 0.07ms/파일(100k~7s),
-      analyze 0.70ms/파일(100k~70s, workers=W면 ~1/W), bestshot ~2.7ms/그룹. **주의**: 합성 이미지가 작아
-      실제 full-res(12~50MP)는 디코드·해시가 10~50배 → analyze 실측치는 하한. 결론: 초선형 병목 없음,
-      100k는 CPU 코어·드라이브 throughput에 비례하는 순수 처리량 문제(멀티프로세싱 병렬화됨).
-      알려진 엣지: 버스트 패스는 동일 timestamp 대량 시 O(N²)(정상 데이터에선 저비용).
+      I/O 단계는 `--real-n`/`--real-size`로 실이미지 실측+외삽(single-process, 로컬 SSD, macOS py3.14):
+      · 128px(~0MP): dedup 0.07ms·analyze 0.70ms/파일
+      · **3000px(~9MP, 폰 사진급): dedup 0.61ms(100k~61s) · analyze 75.5ms/파일 → 100k ~126분 single-process,
+        workers=8이면 ~16분** · bestshot 무시 수준. (24~50MP는 이에 비례해 더 큼.)
+      결론: **초선형(O(N²)) 병목 없음** — 100k의 비용은 analyze의 이미지 디코드가 지배하며 멀티프로세싱으로
+      코어 수만큼 병렬화됨(순수 CPU/드라이브 throughput 문제). 클러스터링 자체는 1.6s로 무시 수준.
+      버스트 O(N²) 엣지는 `burst_max_window`(기본 200) 앵커당 상한으로 가드됨(union 전이성으로 정확성 보존).
 - [ ] 추가 개선 백로그: 유사도 슬라이더·나란히 비교 뷰·키보드 컬링·ETA·`Haar→MediaPipe` 등은
       `docs/benchmarking-2026-07.md`(경쟁 벤치마킹, 미커밋 working note) 참조.
 
