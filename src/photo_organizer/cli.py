@@ -16,6 +16,7 @@ import argparse
 import csv
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from .classify.analyze import run_analyze
@@ -196,13 +197,47 @@ def _report_similar(db: Database, out_path: str | None, fmt: str | None) -> None
     print(f"\n유사그룹: {len(group_ids)}개 그룹")
 
 
+def _report_actions(db: Database, out_path: str | None, fmt: str | None) -> None:
+    rows = list(db.iter_action_log())
+    if not rows:
+        print("정리 내역이 없습니다. (휴지통/격리 작업 후 기록됨)")
+        return
+    _ACTION_LABEL = {"trash": "휴지통", "quarantine": "격리", "move": "이동"}
+
+    def _ts(v):
+        try:
+            return datetime.fromtimestamp(v).strftime("%Y-%m-%d %H:%M:%S")
+        except (TypeError, ValueError, OSError):
+            return ""
+
+    if out_path:
+        _export(
+            out_path, fmt,
+            ["timestamp", "action", "batch", "undone", "from_path", "to_path"],
+            [[_ts(r["timestamp"]), _ACTION_LABEL.get(r["action"], r["action"]),
+              r["batch"], "취소됨" if r["undone"] else "",
+              r["from_path"], r["to_path"] or ""] for r in rows],
+            "감사로그",
+        )
+        return
+    for r in rows:
+        mark = " (취소됨)" if r["undone"] else ""
+        act = _ACTION_LABEL.get(r["action"], r["action"])
+        dest = f" → {r['to_path']}" if r["to_path"] else ""
+        print(f"  [{_ts(r['timestamp'])}] {act}{mark}  {r['from_path']}{dest}")
+    print(f"\n정리 내역: {len(rows)}건")
+
+
 def _cmd_report(args: argparse.Namespace) -> int:
     out_path = args.csv or args.json
     fmt = "csv" if args.csv else ("json" if args.json else None)
     if out_path and args.kind == "all":
-        print("파일 출력은 --kind dup 또는 --kind similar 와 함께 사용하세요.", file=sys.stderr)
+        print("파일 출력은 --kind dup|similar|actions 와 함께 사용하세요.", file=sys.stderr)
         return 2
     with Database(args.db) as db:
+        if args.kind == "actions":
+            _report_actions(db, out_path, fmt)
+            return 0
         total_files = db.count_files()
         if args.kind in ("dup", "all"):
             _report_duplicates(db, out_path if args.kind == "dup" else None, fmt)
@@ -265,11 +300,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_report = sub.add_parser("report", help="리포트 (콘솔 또는 CSV)")
     p_report.add_argument(
-        "--kind", choices=["dup", "similar", "all"], default="all",
-        help="리포트 종류 (기본: all). CSV 출력은 dup 또는 similar만 가능",
+        "--kind", choices=["dup", "similar", "actions", "all"], default="all",
+        help="리포트 종류 (기본: all). 파일 출력은 dup|similar|actions 와 함께",
     )
-    p_report.add_argument("--csv", help="CSV 출력 경로 (--kind dup|similar 와 함께)")
-    p_report.add_argument("--json", help="JSON 출력 경로 (--kind dup|similar 와 함께)")
+    p_report.add_argument("--csv", help="CSV 출력 경로 (--kind dup|similar|actions 와 함께)")
+    p_report.add_argument("--json", help="JSON 출력 경로 (--kind dup|similar|actions 와 함께)")
     p_report.set_defaults(func=_cmd_report)
 
     return parser

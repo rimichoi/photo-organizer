@@ -321,6 +321,13 @@ class Database:
         with self.batch() as conn:
             conn.execute("UPDATE action_log SET undone=1 WHERE batch=?", (batch,))
 
+    def iter_action_log(self):
+        """정리 내역 전체를 시간순(batch, id)으로 조회 (감사 로그 리포트용)."""
+        return self.conn.execute(
+            "SELECT id, file_id, action, from_path, to_path, timestamp, batch, undone "
+            "FROM action_log ORDER BY batch, id"
+        )
+
     # ---- 분석: phash/dhash/썸네일/분류 (Phase 2: analyze가 사용) ----
 
     def iter_files_needing_analysis(self):
