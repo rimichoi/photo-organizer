@@ -42,6 +42,7 @@ def _analyze_task(args: tuple) -> dict:
         "thumb_path": thumb_path,
         "category": category,
         "confidence": confidence,
+        "exif_dt": meta.get("dt"),
     }
 
 
@@ -86,6 +87,9 @@ def run_analyze(
             ))
 
     db.set_analysis_results(updates)
+    dated = [(res["exif_dt"], res["file_id"]) for res in results
+             if res["status"] != "error" and res.get("exif_dt") is not None]
+    db.set_exif_dates(dated)
     db.mark_errors(errors)
     if progress is not None:
         progress(len(updates), len(errors))

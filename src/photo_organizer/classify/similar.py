@@ -94,7 +94,10 @@ def cluster_similar(
     그룹 대표(최소 id)와의 해밍 거리를 0~1로 정규화한 값(대표=1.0).
     """
     cfg = cfg or Config()
-    entries = [(r["id"], r["phash"]) for r in db.iter_phashes() if r["phash"]]
+    rows = list(db.iter_phashes())
+    entries = [(r["id"], r["phash"]) for r in rows if r["phash"]]
+    dt_by_id = {r["id"]: r["exif_dt"] for r in rows if r["phash"]}
+    hex_by_id = dict(entries)
     if progress is not None:
         progress(f"BK-tree 구축: {len(entries)}개")
 
@@ -110,9 +113,27 @@ def cluster_similar(
             if nid != fid:
                 uf.union(fid, nid)
 
+    # 버스트 그룹핑: 촬영시각이 burst_seconds 이내이고 pHash 거리가 burst 임계값
+    # 이내인 사진을 union (포즈가 달라 strict pHash로는 놓치는 연사 보완).
+    # dated를 시간순 정렬해 내부 루프를 window 이탈 시 break — 같은 timestamp가
+    # 대량이면 O(N^2)가 될 수 있으나, 정상 데이터에서 버스트는 시간상 작은
+    # 군집이라 실질 저비용이다.
+    dated = sorted(
+        ((dt_by_id[fid], fid) for fid, _ph in entries if dt_by_id.get(fid) is not None),
+        key=lambda t: t[0],
+    )
+    for i in range(len(dated)):
+        dt_i, fid_i = dated[i]
+        ph_i = hex_by_id[fid_i]
+        for j in range(i + 1, len(dated)):
+            dt_j, fid_j = dated[j]
+            if dt_j - dt_i > cfg.burst_seconds:
+                break  # 시간 정렬됨 → 이후 후보 없음
+            if hamming(ph_i, hex_by_id[fid_j]) <= cfg.burst_hamming_threshold:
+                uf.union(fid_i, fid_j)
+
     # 연결 성분 → 그룹
     comps: dict[int, list[tuple[int, str]]] = {}
-    hex_by_id = dict(entries)
     for fid, ph in entries:
         comps.setdefault(uf.find(fid), []).append((fid, ph))
 

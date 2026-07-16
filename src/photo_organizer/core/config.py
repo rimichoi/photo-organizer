@@ -15,6 +15,8 @@ class Config:
     # --- 유사도 (classify/similar.py) ---
     hamming_threshold: int = 5          # pHash 해밍 거리 이내면 유사로 간주
     phash_bits: int = 64                # pHash 비트 수 (imagehash 기본 8x8)
+    burst_seconds: float = 3.0          # 촬영시각 이 값 이내면 버스트 후보
+    burst_hamming_threshold: int = 10   # 버스트 후보의 pHash 거리 상한(완화, > hamming_threshold)
 
     # --- 썸네일 (classify/phash.py) ---
     thumb_size: int = 256               # 썸네일 최대 변(px)

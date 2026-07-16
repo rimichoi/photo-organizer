@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS files (
     category_confidence REAL,
     scan_status         TEXT DEFAULT 'discovered',  -- discovered/hashed/classified/error
     error_msg           TEXT,
-    missing             INTEGER DEFAULT 0  -- 외부 삭제(디스크에서 사라짐) 표식
+    missing             INTEGER DEFAULT 0,  -- 외부 삭제(디스크에서 사라짐) 표식
+    exif_dt             REAL  -- EXIF 촬영시각(epoch초), 버스트 그룹핑용
 );
 CREATE INDEX IF NOT EXISTS idx_files_size   ON files(size);
 CREATE INDEX IF NOT EXISTS idx_files_status ON files(scan_status);
@@ -96,6 +97,8 @@ class Database:
         if "missing" not in cols("files"):
             # 재스캔 시 디스크에서 사라진 파일 표식 (removed=사용자정리 와 분리)
             self.conn.execute("ALTER TABLE files ADD COLUMN missing INTEGER DEFAULT 0")
+        if "exif_dt" not in cols("files"):
+            self.conn.execute("ALTER TABLE files ADD COLUMN exif_dt REAL")
         alog = cols("action_log")
         if "batch" not in alog:
             self.conn.execute("ALTER TABLE action_log ADD COLUMN batch INTEGER")
@@ -350,6 +353,13 @@ class Database:
                 rows,
             )
 
+    def set_exif_dates(self, rows: list[tuple[float | None, int]]) -> None:
+        """(exif_dt, file_id) 목록 일괄 갱신. exif_dt는 epoch초 또는 None."""
+        if not rows:
+            return
+        with self.batch() as conn:
+            conn.executemany("UPDATE files SET exif_dt=? WHERE id=?", rows)
+
     def mark_errors(self, pairs: list[tuple[int, str]]) -> None:
         """(file_id, error_msg) 목록을 오류 상태로 표시한다."""
         if not pairs:
@@ -387,10 +397,10 @@ class Database:
     # ---- 유사 그룹 (Phase 2: similar가 사용) ----
 
     def iter_phashes(self):
-        """pHash가 계산된 모든 파일의 (id, phash)."""
+        """pHash가 계산된 모든 파일의 (id, phash, exif_dt)."""
         return self.conn.execute(
-            "SELECT id, phash FROM files WHERE phash IS NOT NULL "
-            "AND removed=0 AND missing=0"
+            "SELECT id, phash, exif_dt FROM files "
+            "WHERE phash IS NOT NULL AND removed=0 AND missing=0"
         )
 
     def save_similar_groups(self, groups: list[list[tuple[int, float]]]) -> None:

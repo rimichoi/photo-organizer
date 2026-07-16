@@ -51,6 +51,17 @@ RAW_EXTS = frozenset({
 SUPPORTED_EXTS = RASTER_EXTS | HEIF_EXTS | RAW_EXTS
 
 
+def parse_exif_datetime(s: str | None) -> float | None:
+    """EXIF 'YYYY:MM:DD HH:MM:SS' 문자열을 epoch초(float)로. 실패 시 None."""
+    if not s or not isinstance(s, str):
+        return None
+    from datetime import datetime
+    try:
+        return datetime.strptime(s.strip(), "%Y:%m:%d %H:%M:%S").timestamp()
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
 def _load_raw(norm_path: str) -> Image.Image:
     """rawpy로 RAW를 디코딩해 RGB PIL 이미지로 변환한다.
 
@@ -92,8 +103,9 @@ def load_analyzed(path: str | Path) -> tuple[Optional[Image.Image], dict]:
     """정규화 RGB 이미지와 메타데이터를 한 번의 파일 열기로 함께 반환한다.
 
     네트워크 재접근을 피하기 위해(SPEC 5.1) 분류·해시·썸네일이 공유하는 진입점.
-    반환 meta = {"make": 제조사|None, "model": 모델|None}. 카메라 정보 유무는
-    스크린샷 판정(SPEC 4.4)에 쓰인다. 실패 시 (None, {}).
+    반환 meta = {"make": 제조사|None, "model": 모델|None, "dt": 촬영시각(epoch초)|None}.
+    카메라 정보 유무는 스크린샷 판정(SPEC 4.4)에 쓰이고, "dt"는 버스트 그룹핑
+    (classify/similar.py)에 쓰인다. 실패 시 (None, {}).
     """
     ext = Path(str(path)).suffix.lower()
     norm = normalize_long_path(str(path))
@@ -106,7 +118,14 @@ def load_analyzed(path: str | Path) -> tuple[Optional[Image.Image], dict]:
         img = Image.open(norm)
         exif = img.getexif()
         # 0x010F=Make, 0x0110=Model
-        meta = {"make": exif.get(0x010F), "model": exif.get(0x0110)}
+        dt_raw = exif.get(0x0132)  # DateTime
+        if not dt_raw:
+            try:
+                dt_raw = exif.get_ifd(0x8769).get(0x9003)  # DateTimeOriginal
+            except Exception:
+                dt_raw = None
+        meta = {"make": exif.get(0x010F), "model": exif.get(0x0110),
+                "dt": parse_exif_datetime(dt_raw)}
         img = ImageOps.exif_transpose(img)
         return img.convert("RGB"), meta
     except (UnidentifiedImageError, OSError, ValueError, SyntaxError):
