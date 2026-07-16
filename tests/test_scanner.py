@@ -19,8 +19,8 @@ def test_recursive_scan_and_extension_filter(tmp_path):
     (root / "sub" / "data.json").write_text("{}")
 
     db = Database(tmp_path / "s.db")
-    count = scan_directory(db, root)
-    assert count == 3
+    summary = scan_directory(db, root)
+    assert summary["new"] == 3
     assert db.count_files() == 3
 
     paths = {r["path"] for r in db.conn.execute("SELECT path FROM files")}
@@ -75,11 +75,11 @@ def test_hidden_system_dir_skipped(tmp_path):
     _img(root / ".Spotlight-V100" / "hidden.jpg")
 
     db = Database(tmp_path / "s.db")
-    count = scan_directory(db, root)
+    summary = scan_directory(db, root)
     # 플랫폼 무관하게: macOS면 스킵되어 1, 그 외 OS에선 스킵 규칙 미적용.
     from photo_organizer.core.platform_utils import IS_MACOS
     if IS_MACOS:
-        assert count == 1
+        assert summary["new"] == 1
     else:
-        assert count == 2
+        assert summary["new"] == 2
     db.close()

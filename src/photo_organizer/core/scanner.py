@@ -54,28 +54,58 @@ def scan_directory(
     root: str | Path,
     batch_size: int = 500,
     progress: Optional[Callable[[int], None]] = None,
-) -> int:
-    """root 이하 이미지를 발견해 DB에 기록하고, 발견 개수를 반환한다.
+    detect_deletions: bool = False,
+) -> dict:
+    """root 이하 이미지를 발견해 DB에 upsert 하고 요약 dict 를 반환한다.
 
-    scan_sessions에 세션을 기록해 재개(Phase 5)의 토대를 만든다. 이미 기록된
-    파일은 ``add_file``의 ``INSERT OR IGNORE``로 자연히 건너뛴다.
+    반환: {"new", "updated", "unchanged", "deleted"}. ``deleted`` 는 감지
+    미수행 또는 안전 가드 발동(빈 walk) 시 ``None``.
+
+    scan_sessions에 세션을 기록해 재개(Phase 5)의 토대를 만든다. 발견된 각
+    파일은 ``add_file``이 upsert 하여 신규는 추가하고, 변경된 파일은 파생
+    데이터(중복/유사/베스트샷 등)를 무효화하며, 무변경 재발견은 그대로
+    지나가되 이전에 missing 이었다면 복원한다. 이 반환값의 new/updated/
+    unchanged 는 ``add_file``의 반환("new"/"updated"/"unchanged")을 누적한
+    것이다.
+
+    ``detect_deletions=True`` 이면 이번 walk에서 발견된 경로 집합과
+    ``paths_under_root(root)``(DB상 root 접두어 하위 전체)를 대조해, walk에서
+    발견되지 않은 파일을 ``mark_missing``으로 표시한다. 단, walk 결과가 0개인
+    경우(드라이브 언마운트/네트워크 두절 등으로 root 자체에 접근할 수 없는
+    상황과 구분이 어려움) 안전 가드가 발동해 삭제 감지를 보류하고
+    ``deleted=None`` 을 반환한다(파일들을 missing 잘못 표시하는 것을 막는다).
     """
     root = str(root)
     session_id = db.start_session(root)
-    count = 0
+    counts = {"new": 0, "updated": 0, "unchanged": 0}
+    seen: set[str] = set()
+    processed = 0
     try:
         with db.batch() as conn:
             for raw_path, size, mtime, ext in _iter_image_files(root):
-                db.add_file(raw_path, size, mtime, ext.lstrip("."))
-                count += 1
-                if count % batch_size == 0:
+                status = db.add_file(raw_path, size, mtime, ext.lstrip("."))
+                counts[status] += 1
+                seen.add(raw_path)
+                processed += 1
+                if processed % batch_size == 0:
                     conn.commit()
                     if progress is not None:
-                        progress(count)
-        db.finish_session(session_id, count, status="done")
+                        progress(processed)
+        deleted: int | None = None
+        if detect_deletions:
+            if not seen:
+                # 안전 가드: 빈 walk(언마운트/접근불가) → 삭제 보류.
+                deleted = None
+            else:
+                known = db.paths_under_root(root)
+                gone = [fid for fid, p in known if p not in seen]
+                db.mark_missing(gone)
+                deleted = len(gone)
+        db.finish_session(session_id, processed, status="done")
     except Exception:
-        db.finish_session(session_id, count, status="error")
+        db.finish_session(session_id, processed, status="error")
         raise
     if progress is not None:
-        progress(count)
-    return count
+        progress(processed)
+    counts["deleted"] = deleted
+    return counts
