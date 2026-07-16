@@ -122,9 +122,10 @@ def cluster_similar(
 
     # 버스트 그룹핑: 촬영시각이 burst_seconds 이내이고 pHash 거리가 burst 임계값
     # 이내인 사진을 union (포즈가 달라 strict pHash로는 놓치는 연사 보완).
-    # dated를 시간순 정렬해 내부 루프를 window 이탈 시 break — 같은 timestamp가
-    # 대량이면 O(N^2)가 될 수 있으나, 정상 데이터에서 버스트는 시간상 작은
-    # 군집이라 실질 저비용이다.
+    # dated를 시간순 정렬해 window 이탈 시 break. 동일 timestamp가 비정상적으로
+    # 대량이면(예: 일괄 임포트로 exif가 모두 같은 값) O(N^2)가 될 수 있어, 앵커당
+    # 비교 수를 burst_max_window로 상한한다. union은 전이적이므로 진짜 조밀
+    # 버스트(연속 유사)는 상한이 있어도 체인으로 한 그룹에 모인다 — 정확성 보존.
     dated = sorted(
         ((dt_by_id[fid], fid) for fid, _h in entries if dt_by_id.get(fid) is not None),
         key=lambda t: t[0],
@@ -132,10 +133,14 @@ def cluster_similar(
     for i in range(len(dated)):
         dt_i, fid_i = dated[i]
         h_i = int_by_id[fid_i]
+        compared = 0
         for j in range(i + 1, len(dated)):
             dt_j, fid_j = dated[j]
             if dt_j - dt_i > cfg.burst_seconds:
                 break  # 시간 정렬됨 → 이후 후보 없음
+            compared += 1
+            if compared > cfg.burst_max_window:
+                break  # 비정상적으로 조밀한 시각 블록 → 앵커당 상한(O(N^2) 방지)
             if _ham(h_i, int_by_id[fid_j]) <= cfg.burst_hamming_threshold:
                 uf.union(fid_i, fid_j)
 

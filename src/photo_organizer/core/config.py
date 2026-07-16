@@ -17,6 +17,7 @@ class Config:
     phash_bits: int = 64                # pHash 비트 수 (imagehash 기본 8x8)
     burst_seconds: float = 3.0          # 촬영시각 이 값 이내면 버스트 후보
     burst_hamming_threshold: int = 10   # 버스트 후보의 pHash 거리 상한(완화, > hamming_threshold)
+    burst_max_window: int = 200         # 앵커당 버스트 비교 상한(동일 timestamp 대량 시 O(N^2) 방지)
 
     # --- 썸네일 (classify/phash.py) ---
     thumb_size: int = 256               # 썸네일 최대 변(px)

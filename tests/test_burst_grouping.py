@@ -62,3 +62,21 @@ def test_set_exif_dates(tmp_path):
     db.set_exif_dates([(1234.5, fid)])
     row = db.conn.execute("SELECT exif_dt FROM files WHERE id=?", (fid,)).fetchone()
     assert row["exif_dt"] == 1234.5
+
+
+def test_burst_dense_block_still_groups_despite_window_cap(tmp_path):
+    """동일 timestamp 대량 블록: 앵커당 상한(burst_max_window=200)이 있어도
+    연속 유사 체인은 union 전이성으로 한 그룹에 모인다(정확성 보존, O(N^2) 방지)."""
+    db = Database(tmp_path / "lib.db")
+    n = 250  # burst_max_window(200)보다 큼
+    ids = []
+    h = 0
+    for i in range(n):
+        ids.append(_add(db, f"/r/d{i}.jpg", f"{h & 0xFFFFFFFFFFFFFFFF:016x}", exif_dt=1000.0))
+        # 8비트 롤링 플립 → 연속 거리 8 (strict 5 초과, burst 10 이내): burst 경로로만 연결
+        h ^= (0xFF << ((i * 8) % 56))
+    groups = cluster_similar(db, cfg=Config())
+    id_set = set(ids)
+    containing = [g for g in groups if id_set & {fid for fid, _ in g}]
+    assert len(containing) == 1
+    assert {fid for fid, _ in containing[0]} == id_set
