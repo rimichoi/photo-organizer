@@ -169,6 +169,7 @@ def _report_similar(db: Database, out_path: str | None, fmt: str | None) -> None
     if not rows:
         print("유사 그룹이 없습니다. (analyze → similar 실행 필요)")
         return
+    group_ids = {r["group_id"] for r in rows}
     if out_path:
         _export(
             out_path, fmt,
