@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS files (
     category            TEXT,          -- screenshot/document/blurry/normal/corrupt
     category_confidence REAL,
     scan_status         TEXT DEFAULT 'discovered',  -- discovered/hashed/classified/error
-    error_msg           TEXT
+    error_msg           TEXT,
+    missing             INTEGER DEFAULT 0  -- 외부 삭제(디스크에서 사라짐) 표식
 );
 CREATE INDEX IF NOT EXISTS idx_files_size   ON files(size);
 CREATE INDEX IF NOT EXISTS idx_files_status ON files(scan_status);
@@ -92,6 +93,9 @@ class Database:
         if "removed" not in cols("files"):
             # 휴지통/격리로 정리된 파일 표식 (뷰에서 숨김, 되돌리기로 복원)
             self.conn.execute("ALTER TABLE files ADD COLUMN removed INTEGER DEFAULT 0")
+        if "missing" not in cols("files"):
+            # 재스캔 시 디스크에서 사라진 파일 표식 (removed=사용자정리 와 분리)
+            self.conn.execute("ALTER TABLE files ADD COLUMN missing INTEGER DEFAULT 0")
         alog = cols("action_log")
         if "batch" not in alog:
             self.conn.execute("ALTER TABLE action_log ADD COLUMN batch INTEGER")
@@ -112,8 +116,9 @@ class Database:
         """
         return self.conn.execute(
             """SELECT id, path, size FROM files
-               WHERE size > 0 AND removed=0
-                 AND size IN (SELECT size FROM files WHERE size > 0 AND removed=0
+               WHERE size > 0 AND removed=0 AND missing=0
+                 AND size IN (SELECT size FROM files WHERE size > 0
+                              AND removed=0 AND missing=0
                               GROUP BY size HAVING COUNT(*) > 1)
                ORDER BY size"""
         )
@@ -156,13 +161,13 @@ class Database:
                       f.category, f.category_confidence
                FROM duplicate_groups dg
                JOIN files f ON f.id = dg.file_id
-               WHERE f.removed=0
+               WHERE f.removed=0 AND f.missing=0
                ORDER BY dg.group_id, dg.is_representative DESC, f.path"""
         )
 
     def count_files(self) -> int:
         row = self.conn.execute(
-            "SELECT COUNT(*) AS c FROM files WHERE removed=0"
+            "SELECT COUNT(*) AS c FROM files WHERE removed=0 AND missing=0"
         ).fetchone()
         return row["c"]
 
@@ -214,6 +219,29 @@ class Database:
                 [removed, *file_ids],
             )
 
+    def mark_missing(self, file_ids: list[int], missing: int = 1) -> None:
+        """외부 삭제 감지: 파일들을 missing 표시(재발견 시 upsert가 0으로 복원)."""
+        if not file_ids:
+            return
+        marks = ",".join("?" * len(file_ids))
+        with self.batch() as conn:
+            conn.execute(
+                f"UPDATE files SET missing=? WHERE id IN ({marks})",
+                [missing, *file_ids],
+            )
+
+    def paths_under_root(self, root: str) -> list[tuple[int, str]]:
+        """root 접두어 하위의 (id, path). 삭제 감지 대조용 (removed/missing 무관 전체)."""
+        rows = self.conn.execute("SELECT id, path FROM files")
+        import os
+        prefix = root.rstrip(os.sep) + os.sep
+        out: list[tuple[int, str]] = []
+        for r in rows:
+            p = r["path"]
+            if p == root or p.startswith(prefix):
+                out.append((r["id"], p))
+        return out
+
     def last_undoable_batch(self) -> int | None:
         """되돌릴 수 있는 가장 최근 배치(격리 이동). 휴지통은 OS에서 복구."""
         row = self.conn.execute(
@@ -240,7 +268,8 @@ class Database:
         """아직 pHash가 없고 오류 표시되지 않은 파일 (재개 지원)."""
         return self.conn.execute(
             "SELECT id, path FROM files "
-            "WHERE phash IS NULL AND scan_status != 'error' AND removed=0 ORDER BY id"
+            "WHERE phash IS NULL AND scan_status != 'error' "
+            "AND removed=0 AND missing=0 ORDER BY id"
         )
 
     def set_analysis_results(self, rows: list[tuple]) -> None:
@@ -271,20 +300,21 @@ class Database:
             return self.conn.execute(
                 "SELECT id AS file_id, path, category, thumb_path, size, "
                 "category_confidence FROM files "
-                "WHERE category=? AND removed=0 ORDER BY id",
+                "WHERE category=? AND removed=0 AND missing=0 ORDER BY id",
                 (category,),
             )
         return self.conn.execute(
             "SELECT id AS file_id, path, category, thumb_path, size, "
             "category_confidence FROM files "
-            "WHERE category IS NOT NULL AND removed=0 ORDER BY id"
+            "WHERE category IS NOT NULL AND removed=0 AND missing=0 ORDER BY id"
         )
 
     def category_counts(self) -> dict[str, int]:
         """분류 카테고리별 파일 수."""
         rows = self.conn.execute(
             "SELECT category, COUNT(*) AS c FROM files "
-            "WHERE category IS NOT NULL AND removed=0 GROUP BY category ORDER BY c DESC"
+            "WHERE category IS NOT NULL AND removed=0 AND missing=0 "
+            "GROUP BY category ORDER BY c DESC"
         )
         return {r["category"]: r["c"] for r in rows}
 
@@ -293,7 +323,8 @@ class Database:
     def iter_phashes(self):
         """pHash가 계산된 모든 파일의 (id, phash)."""
         return self.conn.execute(
-            "SELECT id, phash FROM files WHERE phash IS NOT NULL AND removed=0"
+            "SELECT id, phash FROM files WHERE phash IS NOT NULL "
+            "AND removed=0 AND missing=0"
         )
 
     def save_similar_groups(self, groups: list[list[tuple[int, float]]]) -> None:
@@ -350,7 +381,7 @@ class Database:
                       f.size, f.category_confidence
                FROM similar_groups sg
                JOIN files f ON f.id = sg.file_id
-               WHERE f.removed=0
+               WHERE f.removed=0 AND f.missing=0
                ORDER BY sg.group_id, sg.is_best_shot DESC,
                         sg.quality_score DESC, f.path"""
         )
