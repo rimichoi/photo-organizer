@@ -1,0 +1,39 @@
+[project]
+name = "photo-organizer"
+version = "0.1.0"
+description = "네트워크 드라이브 대용량 사진 중복/유사/분류 정리 GUI 프로그램"
+requires-python = ">=3.11"
+# 코어(Phase 1~2) 의존성 — Windows/macOS 공통, 표준 wheel로 설치 가능.
+dependencies = [
+    "Pillow>=10.0",
+    "pillow-heif>=0.15",
+    "imagehash>=4.3",
+    # 4.x로 고정: OpenCV 5.0은 얼굴/눈 인식 Haar cascade를 기본 포함에서 제거함
+    # (베스트샷의 '눈 감음' 검출이 다운로드 없이 동작하려면 4.x 필요).
+    "opencv-python>=4.9,<5",
+    "numpy>=1.26",
+    "send2trash>=1.8",
+]
+
+[project.optional-dependencies]
+raw = ["rawpy>=0.19"]              # RAW 디코딩 (선택)
+gui = ["PySide6>=6.6"]             # Phase 4 GUI
+dl = ["onnxruntime>=1.17"]         # Phase 3 딥러닝/베스트샷
+dev = ["pytest>=8.0", "pytest-cov"]
+build = ["pyinstaller>=6.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[project.scripts]
+photo-organizer-cli = "photo_organizer.cli:main"
+
+[project.gui-scripts]
+photo-organizer-gui = "photo_organizer.gui.app:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
