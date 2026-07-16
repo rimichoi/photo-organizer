@@ -14,6 +14,7 @@ import os
 import shutil
 
 from PySide6.QtCore import Qt, QThread
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
     QProgressBar, QPushButton, QSlider, QSplitter, QTabWidget, QVBoxLayout,
@@ -113,6 +114,7 @@ class MainWindow(QMainWindow):
         for grid in (self._dup_grid, self._sim_grid, self._cat_grid):
             grid.selected.connect(self._detail.show_item)
             grid.action_requested.connect(self._do_action)
+            grid.cull_requested.connect(self._quick_cull)
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self._tabs)
@@ -123,6 +125,7 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(central)
         self.statusBar().showMessage("준비됨")
+        QShortcut(QKeySequence.Undo, self, activated=self._undo_last)
 
     def _build_category_tab(self) -> tuple[QWidget, QComboBox, ThumbnailGrid]:
         w = QWidget()
@@ -207,6 +210,21 @@ class MainWindow(QMainWindow):
         if protected:
             tail += f", {protected}장은 그룹 마지막 항목이라 보존"
         self._status.setText(f"{ok}장을 {where}(으)로 정리{tail}")
+        self._detail.clear()
+        self.load_results()
+
+    def _quick_cull(self, file_ids: list) -> None:
+        """키보드 컬링: 확인 다이얼로그 없이 즉시 격리(되돌리기 가능)."""
+        if not file_ids:
+            return
+        with Database(self._db_path) as db:
+            ok, failed, protected = actions.quarantine_files(
+                db, file_ids, self._quarantine_dir
+            )
+        tail = f" (실패 {failed})" if failed else ""
+        if protected:
+            tail += f", {protected}장은 그룹 마지막이라 보존"
+        self._status.setText(f"격리됨 {ok}장{tail} — 되돌리기(Ctrl+Z)")
         self._detail.clear()
         self.load_results()
 

@@ -98,6 +98,7 @@ class ThumbnailGrid(QListView):
 
     selected = Signal(dict)              # 현재 선택 항목 dict (상세 패널이 구독)
     action_requested = Signal(str, list) # (kind, [file_id,...]) — trash/quarantine
+    cull_requested = Signal(list)        # 키보드 컬링(모달 없는 격리) — [file_id,...]
 
     def __init__(self, placeholder: str = "", single_row: bool = False):
         super().__init__()
@@ -150,6 +151,21 @@ class ThumbnailGrid(QListView):
         item = self._model.item_at(current.row())
         if item:
             self.selected.emit(item)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        key = event.key()
+        idx = self.selectionModel().currentIndex()
+        item = self._model.item_at(idx.row()) if idx.isValid() else None
+        if key in (Qt.Key_Return, Qt.Key_Enter):
+            if idx.isValid():
+                self._open_item(idx)
+            return
+        if key in (Qt.Key_X, Qt.Key_Delete, Qt.Key_Backspace):
+            fid = item.get("file_id") if item else None
+            if fid is not None:
+                self.cull_requested.emit([fid])
+            return
+        super().keyPressEvent(event)  # 화살표 등 내장 네비게이션 유지
 
     def _open_item(self, index: QModelIndex) -> None:
         self._open_path(self._model.path_at(index.row()))
@@ -218,6 +234,7 @@ class GroupedGrid(QScrollArea):
 
     selected = Signal(dict)
     action_requested = Signal(str, list)
+    cull_requested = Signal(list)
 
     def __init__(self, placeholder: str = ""):
         super().__init__()
@@ -284,6 +301,7 @@ class GroupedGrid(QScrollArea):
             grid.set_items(g["items"])
             grid.selected.connect(self.selected)
             grid.action_requested.connect(self.action_requested)
+            grid.cull_requested.connect(self.cull_requested)
             self._vbox.insertWidget(insert_at, grid); insert_at += 1
             self._grids.append(grid)
 

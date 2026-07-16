@@ -137,3 +137,43 @@ def test_mainwindow_loads_from_db(tmp_path):
     assert w._dup_grid.count() == 2   # 완전 중복 쌍은 중복 탭에 표시
     # 순수 완전 중복(바이트 동일)은 유사 탭에서 대표로 접혀 사라진다.
     assert w._sim_grid.count() == 0
+
+
+def test_quick_cull_quarantines_without_modal(tmp_path, monkeypatch):
+    """_quick_cull: 확인 다이얼로그 없이 즉시 격리(되돌리기 가능) + 상태 텍스트 갱신."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+    monkeypatch.delenv("APPDATA", raising=False)
+
+    from photo_organizer.core.database import Database
+    from photo_organizer.core.scanner import scan_directory
+    from photo_organizer.gui.main_window import MainWindow
+
+    root = tmp_path / "photos"
+    root.mkdir()
+    f = root / "a.jpg"
+    f.write_bytes(b"data")
+
+    db_path = tmp_path / "lib.db"
+    with Database(db_path) as db:
+        scan_directory(db, str(root))
+        fid = db.conn.execute("SELECT id FROM files WHERE path=?", (str(f),)).fetchone()["id"]
+
+    w = MainWindow(db_path=str(db_path), thumb_dir=str(tmp_path / "thumbs"))
+
+    # 모달 다이얼로그가 뜨면 즉시 실패하도록(True=호출됨) 감시
+    called = {"modal": False}
+    monkeypatch.setattr(
+        "photo_organizer.gui.main_window.QMessageBox.question",
+        lambda *a, **k: called.__setitem__("modal", True),
+    )
+
+    w._quick_cull([fid])
+
+    assert called["modal"] is False   # 모달 다이얼로그 미호출
+    assert not f.exists()             # 원본 위치에서 격리됨
+    assert list(os.scandir(w._quarantine_dir))  # 격리 폴더로 실제 이동
+    with Database(db_path) as db:
+        row = db.conn.execute("SELECT removed FROM files WHERE id=?", (fid,)).fetchone()
+        assert row["removed"] == 1
+    assert "격리됨" in w._status.text()
