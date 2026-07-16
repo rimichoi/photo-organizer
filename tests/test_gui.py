@@ -90,6 +90,21 @@ def test_double_click_missing_file_warns_and_skips_open(tmp_path, monkeypatch):
     assert "o" not in opened
 
 
+def test_mainwindow_defaults_to_user_data_dir(tmp_path, monkeypatch):
+    """인자 없이 생성하면 cwd가 아니라 OS 사용자 데이터 폴더 하위 경로를 쓴다."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+    monkeypatch.delenv("APPDATA", raising=False)
+
+    from photo_organizer.core.paths import app_data_dir
+
+    w = MainWindow()
+    base = str(app_data_dir())
+    assert w._db_path.startswith(base)
+    assert w._thumb_dir.startswith(base)
+    assert w._quarantine_dir.startswith(base)
+
+
 def test_mainwindow_loads_from_db(tmp_path):
     """엔진으로 만든 DB를 GUI가 읽어 그리드를 채운다."""
     import numpy as np

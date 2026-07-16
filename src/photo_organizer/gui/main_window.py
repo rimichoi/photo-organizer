@@ -23,21 +23,20 @@ from PySide6.QtWidgets import (
 from ..core import actions
 from ..core.config import Config
 from ..core.database import Database
+from ..core.paths import default_db_path, default_quarantine_dir, default_thumb_dir
 from .detail_panel import DetailPanel
 from .thumbnail_grid import GroupedGrid, ThumbnailGrid
 from .workers import PipelineWorker
 
-_DEFAULT_DB = "photo_organizer.db"
-_DEFAULT_THUMB = "thumbnails"
 _MIN_PX, _MAX_PX, _INIT_PX = 96, 320, 160
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, db_path: str = _DEFAULT_DB, thumb_dir: str = _DEFAULT_THUMB):
+    def __init__(self, db_path: str | None = None, thumb_dir: str | None = None):
         super().__init__()
-        self._db_path = db_path
-        self._thumb_dir = thumb_dir
-        self._quarantine_dir = "격리보관함"
+        self._db_path = db_path or default_db_path()
+        self._thumb_dir = thumb_dir or default_thumb_dir()
+        self.__quarantine_dir: str | None = None
         self._root: str | None = None
         self._thread: QThread | None = None
         self._worker: PipelineWorker | None = None
@@ -46,6 +45,15 @@ class MainWindow(QMainWindow):
         self.resize(1280, 820)
         self._build_ui()
         self.load_results()
+
+    @property
+    def _quarantine_dir(self) -> str:
+        """격리 폴더 경로 — 실제 격리 동작 전까지 해석을 미뤄(지연 해석) 단순
+        조회/구성만 하는 호출(테스트 포함)에서 사용자 데이터 폴더가 불필요하게
+        생성되지 않게 한다."""
+        if self.__quarantine_dir is None:
+            self.__quarantine_dir = default_quarantine_dir()
+        return self.__quarantine_dir
 
     # ---------- UI ----------
     def _build_ui(self) -> None:

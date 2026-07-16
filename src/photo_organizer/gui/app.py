@@ -1,7 +1,7 @@
 """GUI 진입점 (docs/SPEC.md Phase 4).
 
 실행:
-    photo-organizer-gui                 # 기본 DB(photo_organizer.db) 사용
+    photo-organizer-gui                 # 기본: OS 사용자 데이터 폴더 아래 DB/썸네일 사용
     photo-organizer-gui --db lib.db --thumb-dir thumbs
 
 multiprocessing(analyze)이 spawn 방식으로 재실행될 때를 대비해 진입점을
@@ -15,8 +15,8 @@ import sys
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="photo-organizer-gui")
-    parser.add_argument("--db", default="photo_organizer.db", help="SQLite DB 경로")
-    parser.add_argument("--thumb-dir", default="thumbnails", help="썸네일 캐시 폴더")
+    parser.add_argument("--db", default=None, help="SQLite DB 경로 (기본: 사용자 데이터 폴더)")
+    parser.add_argument("--thumb-dir", default=None, help="썸네일 폴더 (기본: 사용자 데이터 폴더)")
     args = parser.parse_args(argv)
 
     from PySide6.QtWidgets import QApplication
