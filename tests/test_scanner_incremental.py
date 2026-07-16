@@ -74,6 +74,23 @@ def test_deleted_file_refound_restores(tmp_path):
     assert row["missing"] == 0
 
 
+def test_second_rescan_of_already_deleted_reports_zero(tmp_path):
+    """이미 missing 처리된 파일은 다음 재스캔에서 다시 deleted 로 잡히면 안 된다(유령 카운트)."""
+    root = tmp_path / "photos"
+    f = str(root / "a.jpg")
+    keep = str(root / "keep.jpg")  # bystander: 안전 가드(빈 walk) 회피
+    _write(f)
+    _write(keep)
+    db = Database(tmp_path / "lib.db")
+    scan_directory(db, str(root))
+    os.remove(f)
+    s1 = scan_directory(db, str(root), detect_deletions=True)
+    assert s1["deleted"] == 1
+    # 아무 변화 없이 다시 재스캔 → 이미 missing 인 파일을 또 세면 안 된다
+    s2 = scan_directory(db, str(root), detect_deletions=True)
+    assert s2["deleted"] == 0
+
+
 def test_safety_guard_empty_walk_skips_deletion(tmp_path):
     root = tmp_path / "photos"
     _write(str(root / "a.jpg"))

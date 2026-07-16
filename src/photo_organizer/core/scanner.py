@@ -69,8 +69,11 @@ def scan_directory(
     것이다.
 
     ``detect_deletions=True`` 이면 이번 walk에서 발견된 경로 집합과
-    ``paths_under_root(root)``(DB상 root 접두어 하위 전체)를 대조해, walk에서
-    발견되지 않은 파일을 ``mark_missing``으로 표시한다. 단, walk 결과가 0개인
+    ``paths_under_root(root)``(DB상 root 접두어 하위, removed=0 AND missing=0 인
+    파일만)를 대조해, walk에서 발견되지 않은 파일을 ``mark_missing``으로
+    표시한다. 이미 격리/휴지통으로 정리되었거나 이미 missing 인 파일은 대조
+    대상에서 제외되어, 격리 파일이 missing 으로 오염되거나 유령 삭제가
+    재스캔마다 반복 카운트되는 것을 막는다. 단, walk 결과가 0개인
     경우(드라이브 언마운트/네트워크 두절 등으로 root 자체에 접근할 수 없는
     상황과 구분이 어려움) 안전 가드가 발동해 삭제 감지를 보류하고
     ``deleted=None`` 을 반환한다(파일들을 missing 잘못 표시하는 것을 막는다).

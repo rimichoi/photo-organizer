@@ -111,7 +111,7 @@ class Database:
         scan_status 를 'discovered' 로 되돌려 파이프라인이 재처리하게 한다.
         """
         prev = self.conn.execute(
-            "SELECT size, mtime FROM files WHERE path=?", (path,)
+            "SELECT size, mtime, missing FROM files WHERE path=?", (path,)
         ).fetchone()
         if prev is None:
             self.conn.execute(
@@ -120,10 +120,12 @@ class Database:
             )
             return "new"
         if prev["size"] == size and prev["mtime"] == mtime:
-            # 무변경: 재발견 시 missing 만 복원.
-            self.conn.execute(
-                "UPDATE files SET missing=0 WHERE path=?", (path,)
-            )
+            # 무변경: 재발견 시 missing 만 복원. 이미 missing=0 이면 쓰기 생략
+            # (10만 장 규모 무변경 재스캔에서 불필요한 WAL 쓰기를 막는다).
+            if prev["missing"]:
+                self.conn.execute(
+                    "UPDATE files SET missing=0 WHERE path=?", (path,)
+                )
             return "unchanged"
         # 변경됨: 메타 갱신 + 파생 데이터 무효화.
         self.conn.execute(
@@ -257,8 +259,17 @@ class Database:
             )
 
     def paths_under_root(self, root: str) -> list[tuple[int, str]]:
-        """root 접두어 하위의 (id, path). 삭제 감지 대조용 (removed/missing 무관 전체)."""
-        rows = self.conn.execute("SELECT id, path FROM files")
+        """root 접두어 하위의 (id, path). 삭제 감지 대조용 — 이미 격리/휴지통으로
+
+        정리된(removed=1) 파일과 이미 missing 처리된 파일은 대조 대상에서
+        제외한다(removed=0 AND missing=0). 그렇지 않으면 (a) 사용자가 격리한
+        파일이 재스캔 시 missing=1 로 오염되어 되돌리기 후에도 뷰에서 계속
+        숨겨지고, (b) 이미 missing 인 파일이 재스캔마다 매번 deleted 로 다시
+        카운트되는 유령 삭제 카운트가 발생한다.
+        """
+        rows = self.conn.execute(
+            "SELECT id, path FROM files WHERE removed=0 AND missing=0"
+        )
         import os
         prefix = root.rstrip(os.sep) + os.sep
         out: list[tuple[int, str]] = []
