@@ -11,6 +11,7 @@ r"""플랫폼(Windows/macOS/Linux) 의존적인 경로·파일 처리를 한 곳
 from __future__ import annotations
 
 import sys
+import unicodedata
 
 IS_WINDOWS = sys.platform.startswith("win")
 IS_MACOS = sys.platform == "darwin"
@@ -64,6 +65,17 @@ def normalize_long_path(path: str) -> str:
     import os
 
     return "\\\\?\\" + os.path.abspath(s)
+
+
+def to_nfc(path: str) -> str:
+    """경로 문자열을 유니코드 NFC로 정규화한다.
+
+    macOS는 파일명을 NFD(자모 분리)로 다루고 Windows/대부분 NAS는 NFC(음절 결합)를
+    쓴다. DB 저장·비교 경계에서 이 함수로 NFC로 통일해 한글 파일명의 중복 오탐과
+    증분 재스캔/삭제 감지 오판을 막는다. (파일 API 접근용 접두어 처리는
+    normalize_long_path가 별도로 담당 — 역할이 다르다.)
+    """
+    return unicodedata.normalize("NFC", str(path))
 
 
 def should_skip_dir(name: str) -> bool:

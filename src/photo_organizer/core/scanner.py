@@ -15,7 +15,7 @@ from typing import Callable, Iterator, Optional
 
 from .database import Database
 from .image_loader import SUPPORTED_EXTS
-from .platform_utils import normalize_long_path, should_skip_dir
+from .platform_utils import normalize_long_path, should_skip_dir, to_nfc
 
 
 def _iter_image_files(root: str) -> Iterator[tuple[str, int, float, str]]:
@@ -61,6 +61,9 @@ def scan_directory(
     반환: {"new", "updated", "unchanged", "deleted"}. ``deleted`` 는 감지
     미수행 또는 안전 가드 발동(빈 walk) 시 ``None``.
 
+    발견된 경로는 DB 저장 전 NFC로 정규화한다(macOS NFD와 Windows/NAS NFC의
+    차이로 인한 중복 기록·증분 재스캔/삭제 감지 오판을 막기 위함).
+
     scan_sessions에 세션을 기록해 재개(Phase 5)의 토대를 만든다. 발견된 각
     파일은 ``add_file``이 upsert 하여 신규는 추가하고, 변경된 파일은 파생
     데이터(중복/유사/베스트샷 등)를 무효화하며, 무변경 재발견은 그대로
@@ -86,6 +89,7 @@ def scan_directory(
     try:
         with db.batch() as conn:
             for raw_path, size, mtime, ext in _iter_image_files(root):
+                raw_path = to_nfc(raw_path)
                 status = db.add_file(raw_path, size, mtime, ext.lstrip("."))
                 counts[status] += 1
                 seen.add(raw_path)

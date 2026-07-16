@@ -102,6 +102,23 @@ class Database:
         if "undone" not in alog:
             self.conn.execute("ALTER TABLE action_log ADD COLUMN undone INTEGER DEFAULT 0")
 
+        # 경로 NFC 정규화 (user_version 1). macOS NFD로 저장된 기존 경로를 1회 보정.
+        ver = self.conn.execute("PRAGMA user_version").fetchone()[0]
+        if ver < 1:
+            import unicodedata
+            rows = self.conn.execute("SELECT id, path FROM files").fetchall()
+            for r in rows:
+                nfc = unicodedata.normalize("NFC", r["path"])
+                if nfc != r["path"]:
+                    try:
+                        self.conn.execute(
+                            "UPDATE files SET path=? WHERE id=?", (nfc, r["id"])
+                        )
+                    except sqlite3.IntegrityError:
+                        # NFC 형태의 행이 이미 존재(과거 중복 기록) → 중복 NFD 행 제거.
+                        self.conn.execute("DELETE FROM files WHERE id=?", (r["id"],))
+            self.conn.execute("PRAGMA user_version=1")
+
     def add_file(self, path: str, size: int, mtime: float, fmt: str | None = None) -> str:
         """디스커버리/재스캔 단계: 파일 정보를 upsert 한다.
 
