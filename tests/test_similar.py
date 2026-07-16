@@ -1,7 +1,7 @@
-"""유사도 클러스터링 테스트 — 해밍 거리, BK-tree, 그룹핑."""
+"""유사도 클러스터링 테스트 — 해밍 거리, 멀티인덱스 이웃 탐색, 그룹핑."""
 import pytest
 
-from photo_organizer.classify.similar import BKTree, hamming
+from photo_organizer.classify.similar import hamming, pairs_within_threshold
 
 
 def test_hamming_basic():
@@ -16,38 +16,37 @@ def test_hamming_symmetric():
     assert hamming(a, b) == hamming(b, a)
 
 
-def test_bktree_finds_within_threshold():
-    tree = BKTree()
-    items = [
-        (1, "0000"),
-        (2, "0001"),  # dist 1 from #1
-        (3, "000f"),  # dist 3 from #1
-        (4, "ffff"),  # dist 16 from #1
-    ]
-    for it in items:
-        tree.add(it)
-
-    within2 = {fid for _d, fid in tree.query("0000", 2)}
-    assert within2 == {1, 2}  # 3은 거리3, 4는 거리16 → 제외
-
-    within4 = {fid for _d, fid in tree.query("0000", 4)}
-    assert within4 == {1, 2, 3}
+def _pairs_set(entries, threshold, bits):
+    """양방향 정규화한 쌍 집합 (a<b)."""
+    out = set()
+    for a, b in pairs_within_threshold(entries, threshold, bits):
+        out.add((a, b) if a < b else (b, a))
+    return out
 
 
-def test_bktree_empty():
-    assert BKTree().query("0000", 5) == []
+def test_pairs_within_threshold_matches_bruteforce():
+    """멀티인덱스 해싱 결과가 전수 비교와 정확히 일치해야 한다(거짓 음성 없음)."""
+    # 결정적 의사난수 32비트 해시.
+    entries = [(i, (i * 2654435761) & 0xFFFFFFFF) for i in range(80)]
+    bits = 32
+    for threshold in (0, 3, 8, 12):
+        got = _pairs_set(entries, threshold, bits)
+        expected = set()
+        for ia in range(len(entries)):
+            fa, ha = entries[ia]
+            for ib in range(ia + 1, len(entries)):
+                fb, hb = entries[ib]
+                if bin(ha ^ hb).count("1") <= threshold:
+                    expected.add((fa, fb) if fa < fb else (fb, fa))
+        assert got == expected, f"threshold={threshold}"
 
 
-def test_bktree_matches_bruteforce():
-    """BK-tree 조회 결과가 전수 비교와 일치해야 한다(정확성)."""
-    # 결정적 의사난수 해시 생성 (Math.random 등 불필요).
-    items = [(i, format((i * 2654435761) & 0xFFFFFFFF, "08x")) for i in range(50)]
-    tree = BKTree()
-    for it in items:
-        tree.add(it)
+def test_pairs_within_threshold_finds_close_pair():
+    # 거리 1인 쌍은 어떤 밴딩에서도 반드시 검출.
+    entries = [(1, 0x0000), (2, 0x0001), (3, 0xFFFF)]
+    got = _pairs_set(entries, 2, 16)
+    assert (1, 2) in got and (1, 3) not in got and (2, 3) not in got
 
-    threshold = 8
-    for _fid, ph in items:
-        got = {fid for _d, fid in tree.query(ph, threshold)}
-        expected = {fid for fid, h in items if hamming(ph, h) <= threshold}
-        assert got == expected
+
+def test_pairs_within_threshold_empty():
+    assert list(pairs_within_threshold([], 5, 64)) == []

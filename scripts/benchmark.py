@@ -112,7 +112,7 @@ def bench_algorithms(n: int, results: dict) -> None:
     with _timed("populate (setup)", results):
         populate_synthetic(db, n, cfg)
 
-    with _timed("similar clustering (BK-tree+union+burst)", results):
+    with _timed("similar clustering (multi-index+union+burst)", results):
         groups = cluster_similar(db, cfg=cfg)
     print(f"    → 유사 그룹 {len(groups):,}개")
 
