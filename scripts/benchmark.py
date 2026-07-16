@@ -26,7 +26,10 @@ from contextlib import contextmanager
 
 from photo_organizer.core.config import Config
 from photo_organizer.core.database import Database
+from photo_organizer.classify.analyze import run_analyze
+from photo_organizer.classify.bestshot import run_bestshot
 from photo_organizer.classify.similar import cluster_similar
+from photo_organizer.core.hasher import find_exact_duplicates
 from photo_organizer.core.scanner import scan_directory
 
 _IS_MAC = sys.platform == "darwin"
@@ -166,20 +169,90 @@ def bench_scan(scan_n: int, results: dict) -> None:
     db.close()
 
 
+def bench_real(real_n: int, results: dict) -> None:
+    """실제 이미지로 dedup(파일 해시)·analyze(디코드+썸네일)·bestshot 비용 실측.
+
+    합성 DB로는 잴 수 없는 I/O 바운드 단계를 소규모로 재고 per-item 비용을
+    100k로 외삽한다(workers=1 single-process 기준). 실제 네트워크 드라이브는
+    I/O 지연이 더해지고, analyze/dedup은 CPU 바운드라 멀티프로세싱으로 ~1/W 가능.
+    """
+    if real_n <= 0:
+        return
+    from PIL import Image
+    import shutil
+
+    cfg = Config()
+    tmp = tempfile.mkdtemp(prefix="poreal_")
+    root = os.path.join(tmp, "photos")
+    os.makedirs(root)
+    print(f"\n[실이미지 I/O — base {real_n:,}장 + 근사/완전중복, 실제 파이프라인 workers=1]")
+
+    paths = []
+    with _timed("generate real jpegs (setup)", results):
+        for i in range(real_n):
+            img = Image.frombytes("RGB", (128, 128), os.urandom(128 * 128 * 3))
+            p = os.path.join(root, f"img{i:06d}.jpg")
+            img.save(p, "JPEG", quality=85)
+            paths.append((p, img))
+            if i % 10 == 0:  # 10%: 근사중복 2장(재인코딩 → pHash 근접 → 유사 그룹)
+                for q in (70, 55):
+                    img.save(os.path.join(root, f"img{i:06d}_v{q}.jpg"), "JPEG", quality=q)
+        for i in range(0, real_n // 7):  # ~15%: 완전중복(dedup 대상)
+            shutil.copy(paths[i][0], os.path.join(root, f"dup{i:06d}.jpg"))
+
+    db = Database(os.path.join(tmp, "real.db"))
+    thumb_dir = os.path.join(tmp, "thumbs")
+
+    with _timed("scan (real)", results):
+        n_files = scan_directory(db, root)["new"]
+    print(f"    → 발견 {n_files:,}개")
+
+    with _timed("dedup (file hashing)", results):
+        dups = find_exact_duplicates(db, workers=1)
+    print(f"    → 중복 그룹 {len(dups):,}개")
+
+    with _timed("analyze (decode+phash+thumb+classify)", results):
+        ok, err = run_analyze(db, thumb_dir, workers=1, cfg=cfg)
+    print(f"    → 분석 성공 {ok:,} 오류 {err:,}")
+
+    with _timed("similar (real phashes)", results):
+        sims = cluster_similar(db, cfg=cfg)
+    print(f"    → 유사 그룹 {len(sims):,}개")
+
+    with _timed("bestshot (quality scoring)", results):
+        nb = run_bestshot(db, cfg=cfg)
+    print(f"    → 베스트샷 그룹 {nb:,}개")
+    db.close()
+
+    dedup_ms = results["dedup (file hashing)"] / n_files * 1000
+    analyze_ms = results["analyze (decode+phash+thumb+classify)"] / max(ok, 1) * 1000
+    print(f"\n  [per-item, single-process] dedup {dedup_ms:.2f} ms/파일 · "
+          f"analyze {analyze_ms:.2f} ms/파일")
+    print(f"  [100k 외삽, single-process] dedup ~{dedup_ms * 100:.0f}s · "
+          f"analyze ~{analyze_ms * 100:.0f}s "
+          f"(≈{analyze_ms * 100 / 60:.1f}분)")
+    print("    * analyze/dedup은 CPU 바운드 → workers=W 시 대략 1/W. "
+          "네트워크 드라이브는 파일당 I/O 지연이 추가됨(로컬 SSD 기준치).")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="photo-organizer 성능 벤치마크")
-    ap.add_argument("--n", type=int, default=100_000, help="합성 DB 행 수 (기본 100k)")
+    ap.add_argument("--n", type=int, default=100_000, help="합성 DB 행 수 (0=생략)")
     ap.add_argument("--scan-n", type=int, default=100_000, help="스캔용 빈 파일 수 (0=생략)")
+    ap.add_argument("--real-n", type=int, default=0, help="실이미지 base 장수 (0=생략)")
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
     random.seed(args.seed)
 
-    print(f"=== photo-organizer 벤치마크 (N={args.n:,}, scan-n={args.scan_n:,}) ===")
+    print(f"=== photo-organizer 벤치마크 "
+          f"(N={args.n:,}, scan-n={args.scan_n:,}, real-n={args.real_n:,}) ===")
     print(f"플랫폼: {sys.platform}, python {sys.version.split()[0]}")
     results: dict = {}
     t0 = time.perf_counter()
-    bench_algorithms(args.n, results)
+    if args.n > 0:
+        bench_algorithms(args.n, results)
     bench_scan(args.scan_n, results)
+    bench_real(args.real_n, results)
     print(f"\n총 소요: {time.perf_counter() - t0:.1f}s, 최종 피크 RSS {_rss_mb():.1f} MB")
     return 0
 
