@@ -78,11 +78,17 @@ scan(디스커버리) → dedup(완전중복: 크기→빠른해시→SHA-256)
 
 ## 5. 남은 작업 (Phase 5 마감)
 
-- [x] **증분 재스캔**: mtime 비교로 변경/신규만 재처리, 삭제된 파일 감지(`removed` 표시 재활용 가능).
+- [x] **증분 재스캔**: size+mtime 변경 감지(upsert+파생 무효화), 삭제 감지(`missing` 플래그, root 스코프 + 빈-walk 안전 가드), CLI `--detect-deletions`, GUI 배선.
+- [x] **한글 NFC 경로 정규화**: macOS(NFD)↔Windows/NAS(NFC) 중복 오탐/재스캔 오판 방지. scanner walk+root NFC, DB 1회성 마이그레이션.
+- [x] **그룹당 최소 1장 보존**: 제거 시 그룹이 비면 대표/베스트샷 보호(`Database.protected_survivors`, actions 3-tuple 반환).
+- [x] **감사 로그 export**: CLI `report --kind actions` (CSV/JSON/콘솔).
+- [x] **EXIF 버스트 그룹핑**: 촬영시각 근접 + 완화 pHash 임계값으로 연사 묶기(`exif_dt` 컬럼, config `burst_seconds`/`burst_hamming_threshold`).
 - [ ] **PyInstaller 패키징**: Windows `.exe`, macOS `.app` 각각. spec 파일 작성 + 실행 안내.
       (주의: onnxruntime/PySide6 3.14 조합 확인 필요. GUI만이면 PySide6 6.11로 가능)
 - [ ] **10만 장 성능/부하 테스트**: 합성 대용량 데이터셋으로 시간·메모리·DB 크기 측정.
-- [ ] (선택) 네트워크 드라이브 자격증명 UI, ETA/속도 표시, 베스트샷 클릭 수동 교체.
+      (이때 함께 확인: `protected_survivors`·버스트 패스 O(N²) 스케일)
+- [ ] 추가 개선 백로그: 유사도 슬라이더·나란히 비교 뷰·키보드 컬링·ETA·`Haar→MediaPipe` 등은
+      `docs/benchmarking-2026-07.md`(경쟁 벤치마킹, 미커밋 working note) 참조.
 
 ## 6. 알아둘 점 / 함정
 
