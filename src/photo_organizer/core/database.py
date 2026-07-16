@@ -115,8 +115,13 @@ class Database:
                             "UPDATE files SET path=? WHERE id=?", (nfc, r["id"])
                         )
                     except sqlite3.IntegrityError:
-                        # NFC 형태의 행이 이미 존재(과거 중복 기록) → 중복 NFD 행 제거.
-                        self.conn.execute("DELETE FROM files WHERE id=?", (r["id"],))
+                        # NFC 형태의 행이 이미 존재(과거 중복 기록) → 중복 NFD 행과
+                        # 그 의존 행(그룹/로그)을 함께 제거해 고아 참조를 막는다.
+                        rid = r["id"]
+                        self.conn.execute("DELETE FROM duplicate_groups WHERE file_id=?", (rid,))
+                        self.conn.execute("DELETE FROM similar_groups WHERE file_id=?", (rid,))
+                        self.conn.execute("DELETE FROM action_log WHERE file_id=?", (rid,))
+                        self.conn.execute("DELETE FROM files WHERE id=?", (rid,))
             self.conn.execute("PRAGMA user_version=1")
 
     def add_file(self, path: str, size: int, mtime: float, fmt: str | None = None) -> str:

@@ -81,7 +81,7 @@ def scan_directory(
     상황과 구분이 어려움) 안전 가드가 발동해 삭제 감지를 보류하고
     ``deleted=None`` 을 반환한다(파일들을 missing 잘못 표시하는 것을 막는다).
     """
-    root = str(root)
+    root = to_nfc(str(root))
     session_id = db.start_session(root)
     counts = {"new": 0, "updated": 0, "unchanged": 0}
     seen: set[str] = set()
