@@ -208,7 +208,7 @@ def _report_actions(db: Database, out_path: str | None, fmt: str | None) -> None
     def _ts(v):
         try:
             return datetime.fromtimestamp(v).strftime("%Y-%m-%d %H:%M:%S")
-        except (TypeError, ValueError, OSError):
+        except (TypeError, ValueError, OSError, OverflowError):
             return ""
 
     if out_path:
