@@ -96,10 +96,7 @@ def test_safety_guard_empty_walk_skips_deletion(tmp_path):
     _write(str(root / "a.jpg"))
     db = Database(tmp_path / "lib.db")
     scan_directory(db, str(root))
-    # root 를 통째로 접근 불가로: 존재하지 않는 경로로 재스캔(빈 walk)
-    gone = tmp_path / "photos_gone"
-    # DB 경로는 여전히 root 하위지만 walk 대상 root 를 바꿔 빈 결과를 유도할 수는 없으므로
-    # 실제 root 내용을 모두 지워 빈 walk 를 만든다.
+    # root 내용을 모두 지워 빈 walk 를 만든다(언마운트/접근불가와 동일한 신호).
     os.remove(str(root / "a.jpg"))
     os.rmdir(str(root))
     os.makedirs(str(root))  # 빈 디렉토리 → walk 0개
