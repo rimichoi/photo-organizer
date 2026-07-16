@@ -102,12 +102,38 @@ class Database:
         if "undone" not in alog:
             self.conn.execute("ALTER TABLE action_log ADD COLUMN undone INTEGER DEFAULT 0")
 
-    def add_file(self, path: str, size: int, mtime: float, fmt: str | None = None) -> None:
-        """디스커버리 단계: 파일 기본 정보 기록 (이미 있으면 무시)."""
+    def add_file(self, path: str, size: int, mtime: float, fmt: str | None = None) -> str:
+        """디스커버리/재스캔 단계: 파일 정보를 upsert 한다.
+
+        반환값: 'new'(신규), 'updated'(size/mtime 변경 → 파생 무효화),
+        'unchanged'(변경 없음, missing 만 0 복원). 변경 시 content_hash·phash·
+        dhash·thumb_path·category·category_confidence·error_msg 를 NULL 로 리셋하고
+        scan_status 를 'discovered' 로 되돌려 파이프라인이 재처리하게 한다.
+        """
+        prev = self.conn.execute(
+            "SELECT size, mtime FROM files WHERE path=?", (path,)
+        ).fetchone()
+        if prev is None:
+            self.conn.execute(
+                "INSERT INTO files(path, size, mtime, format) VALUES (?,?,?,?)",
+                (path, size, mtime, fmt),
+            )
+            return "new"
+        if prev["size"] == size and prev["mtime"] == mtime:
+            # 무변경: 재발견 시 missing 만 복원.
+            self.conn.execute(
+                "UPDATE files SET missing=0 WHERE path=?", (path,)
+            )
+            return "unchanged"
+        # 변경됨: 메타 갱신 + 파생 데이터 무효화.
         self.conn.execute(
-            "INSERT OR IGNORE INTO files(path, size, mtime, format) VALUES (?,?,?,?)",
-            (path, size, mtime, fmt),
+            "UPDATE files SET size=?, mtime=?, format=?, "
+            "content_hash=NULL, phash=NULL, dhash=NULL, thumb_path=NULL, "
+            "category=NULL, category_confidence=NULL, error_msg=NULL, "
+            "scan_status='discovered', missing=0 WHERE path=?",
+            (size, mtime, fmt, path),
         )
+        return "updated"
 
     def iter_size_duplicates(self):
         """완전 중복 후보: 동일 크기가 2개 이상인 파일들만 반환 (해시 대상 최소화).
