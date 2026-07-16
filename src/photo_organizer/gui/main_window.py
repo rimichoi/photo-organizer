@@ -225,8 +225,11 @@ class MainWindow(QMainWindow):
         self._progress.setVisible(False)
         self._start_btn.setEnabled(True)
         self._reset_btn.setEnabled(True)
+        deleted = summary.get("scanned_deleted")
+        deleted_text = f"{deleted:,}" if deleted is not None else "-"
         self._status.setText(
-            f"완료 — 스캔 {summary['scanned']:,} · "
+            f"완료 — 신규 {summary['scanned_new']:,} · "
+            f"변경 {summary['scanned_updated']:,} · 삭제 {deleted_text} · "
             f"중복그룹 {summary['duplicate_groups']} · "
             f"유사그룹 {summary['similar_groups']} · 오류 {summary['analyzed_err']}"
         )

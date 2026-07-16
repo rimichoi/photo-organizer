@@ -32,6 +32,7 @@ class PipelineWorker(QObject):
         thumb_dir: str,
         workers: int = 1,
         cfg: Config | None = None,
+        detect_deletions: bool = True,
     ):
         super().__init__()
         self._db_path = db_path
@@ -39,15 +40,17 @@ class PipelineWorker(QObject):
         self._thumb_dir = thumb_dir
         self._workers = workers
         self._cfg = cfg or Config()
+        self._detect_deletions = detect_deletions
 
     def run(self) -> None:
         """스레드에서 호출된다. 각 단계 완료 시 progress를 emit."""
         try:
             with Database(self._db_path) as db:
                 self.progress.emit("① 스캔 시작…")
-                scanned = scan_directory(
+                scan_summary = scan_directory(
                     db, self._root,
                     progress=lambda c: self.progress.emit(f"① 스캔 중… {c:,}개 발견"),
+                    detect_deletions=self._detect_deletions,
                 )
 
                 self.progress.emit("② 완전 중복 검출 중…")
@@ -65,7 +68,9 @@ class PipelineWorker(QObject):
                 best_groups = run_bestshot(db, cfg=self._cfg)
 
                 summary = {
-                    "scanned": scanned,
+                    "scanned_new": scan_summary["new"],
+                    "scanned_updated": scan_summary["updated"],
+                    "scanned_deleted": scan_summary["deleted"],
                     "analyzed_ok": ok,
                     "analyzed_err": err,
                     "duplicate_groups": len(dups),
