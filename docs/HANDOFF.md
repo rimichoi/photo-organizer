@@ -88,7 +88,10 @@ scan(디스커버리) → dedup(완전중복: 크기→빠른해시→SHA-256)
 - [x] **10만 장 성능/부하 테스트**: `scripts/benchmark.py`(하이브리드 — 알고리즘은 합성 DB 100k, scan은 빈 파일 100k).
       결과(macOS py3.14): scan 0.84s · 재스캔/삭제감지 ~0.7s · protected_survivors 0.09s · report 0.09s · DB 19MB · 피크 RSS 123MB — 모두 우수.
       **병목이던 유사 클러스터링을 BK-tree→멀티인덱스 해싱으로 교체해 524s→1.6s(약 330배, 결과 불변).**
-      미측정(실제 이미지 I/O 필요): dedup(파일 해시)·analyze(디코드+썸네일)·bestshot(썸네일 읽기) — 소규모 실측+외삽 필요.
+      I/O 단계는 `--real-n`으로 실이미지 실측+외삽(2685파일, 128px, single-process): dedup 0.07ms/파일(100k~7s),
+      analyze 0.70ms/파일(100k~70s, workers=W면 ~1/W), bestshot ~2.7ms/그룹. **주의**: 합성 이미지가 작아
+      실제 full-res(12~50MP)는 디코드·해시가 10~50배 → analyze 실측치는 하한. 결론: 초선형 병목 없음,
+      100k는 CPU 코어·드라이브 throughput에 비례하는 순수 처리량 문제(멀티프로세싱 병렬화됨).
       알려진 엣지: 버스트 패스는 동일 timestamp 대량 시 O(N²)(정상 데이터에선 저비용).
 - [ ] 추가 개선 백로그: 유사도 슬라이더·나란히 비교 뷰·키보드 컬링·ETA·`Haar→MediaPipe` 등은
       `docs/benchmarking-2026-07.md`(경쟁 벤치마킹, 미커밋 working note) 참조.
