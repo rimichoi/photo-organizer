@@ -411,6 +411,40 @@ class Database:
         )
         return {r["file_id"] for r in rows}
 
+    def protected_survivors(self, file_ids: list[int]) -> set[int]:
+        """제거 요청 file_ids 중, 그룹의 마지막 남는 활성 멤버라 보호해야 할 id.
+
+        중복/유사 그룹의 활성(removed=0 AND missing=0) 멤버가 전부 요청에 포함되면
+        그룹이 통째로 비므로, 대표(is_representative)/베스트샷(is_best_shot)을 1장
+        보호한다. 해당 플래그가 없으면 가장 작은 file_id를 보호한다(결정적).
+        """
+        req = set(file_ids)
+        if not req:
+            return set()
+        protected: set[int] = set()
+
+        def _guard(rows) -> None:
+            groups: dict[int, list[tuple[int, int]]] = {}
+            for r in rows:
+                groups.setdefault(r["group_id"], []).append((r["file_id"], r["flag"]))
+            for members in groups.values():
+                active = [fid for fid, _ in members]
+                if active and set(active) <= req:  # 그룹 전체가 제거 대상
+                    reps = [fid for fid, flag in members if flag]
+                    protected.add(min(reps) if reps else min(active))
+
+        _guard(self.conn.execute(
+            "SELECT dg.group_id AS group_id, dg.file_id AS file_id, "
+            "dg.is_representative AS flag FROM duplicate_groups dg "
+            "JOIN files f ON f.id = dg.file_id WHERE f.removed=0 AND f.missing=0"
+        ).fetchall())
+        _guard(self.conn.execute(
+            "SELECT sg.group_id AS group_id, sg.file_id AS file_id, "
+            "sg.is_best_shot AS flag FROM similar_groups sg "
+            "JOIN files f ON f.id = sg.file_id WHERE f.removed=0 AND f.missing=0"
+        ).fetchall())
+        return protected
+
     def iter_similar_members_with_thumbs(self):
         """유사 그룹 구성원과 썸네일 경로 (베스트샷 계산용)."""
         return self.conn.execute(

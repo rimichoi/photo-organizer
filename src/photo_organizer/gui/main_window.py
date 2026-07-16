@@ -190,12 +190,14 @@ class MainWindow(QMainWindow):
             return
         with Database(self._db_path) as db:
             if kind == "trash":
-                ok, failed = actions.trash_files(db, file_ids)
+                ok, failed, protected = actions.trash_files(db, file_ids)
                 where = "휴지통"
             else:
-                ok, failed = actions.quarantine_files(db, file_ids, self._quarantine_dir)
+                ok, failed, protected = actions.quarantine_files(db, file_ids, self._quarantine_dir)
                 where = "격리 폴더"
         tail = f" (실패 {failed})" if failed else ""
+        if protected:
+            tail += f", {protected}장은 그룹 마지막 항목이라 보존"
         self._status.setText(f"{ok}장을 {where}(으)로 정리{tail}")
         self._detail.clear()
         self.load_results()

@@ -29,13 +29,19 @@ def _unique_dest(dest_dir: str, name: str) -> str:
     return candidate
 
 
-def trash_files(db: Database, file_ids: list[int]) -> tuple[int, int]:
-    """파일들을 OS 휴지통으로 보낸다. (성공 수, 실패 수) 반환."""
+def trash_files(db: Database, file_ids: list[int]) -> tuple[int, int, int]:
+    """파일들을 OS 휴지통으로 보낸다. (성공, 실패, 보호됨) 반환.
+
+    그룹(중복/유사)이 통째로 비게 되는 경우 대표/베스트샷 1장은 보호되어
+    제거되지 않는다(비파괴 안전망).
+    """
+    protected = db.protected_survivors(file_ids)
+    targets = [f for f in file_ids if f not in protected]
     batch = db.next_action_batch()
     rows: list[tuple] = []
     done: list[int] = []
     failed = 0
-    for fid, path in db.paths_for_ids(file_ids):
+    for fid, path in db.paths_for_ids(targets):
         try:
             send2trash(normalize_long_path(path))
             rows.append((fid, "trash", path, None))
@@ -44,19 +50,25 @@ def trash_files(db: Database, file_ids: list[int]) -> tuple[int, int]:
             failed += 1
     db.record_actions(batch, rows)
     db.mark_removed(done, 1)
-    return len(done), failed
+    return len(done), failed, len(protected)
 
 
 def quarantine_files(
     db: Database, file_ids: list[int], quarantine_dir: str
-) -> tuple[int, int]:
-    """파일들을 격리 폴더로 이동한다. (성공 수, 실패 수) 반환."""
+) -> tuple[int, int, int]:
+    """파일들을 격리 폴더로 이동한다. (성공, 실패, 보호됨) 반환.
+
+    그룹(중복/유사)이 통째로 비게 되는 경우 대표/베스트샷 1장은 보호되어
+    제거되지 않는다(비파괴 안전망).
+    """
+    protected = db.protected_survivors(file_ids)
+    targets = [f for f in file_ids if f not in protected]
     os.makedirs(quarantine_dir, exist_ok=True)
     batch = db.next_action_batch()
     rows: list[tuple] = []
     done: list[int] = []
     failed = 0
-    for fid, path in db.paths_for_ids(file_ids):
+    for fid, path in db.paths_for_ids(targets):
         try:
             dest = _unique_dest(quarantine_dir, os.path.basename(path))
             shutil.move(normalize_long_path(path), normalize_long_path(dest))
@@ -66,7 +78,7 @@ def quarantine_files(
             failed += 1
     db.record_actions(batch, rows)
     db.mark_removed(done, 1)
-    return len(done), failed
+    return len(done), failed, len(protected)
 
 
 def undo_last(db: Database) -> int:

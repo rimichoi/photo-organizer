@@ -21,7 +21,7 @@ def test_trash_marks_removed_and_logs(tmp_path, monkeypatch):
     db = Database(tmp_path / "t.db")
     fid = _add(db, str(f))
 
-    ok, failed = actions.trash_files(db, [fid])
+    ok, failed, _ = actions.trash_files(db, [fid])
     assert (ok, failed) == (1, 0)
     assert not f.exists()
     assert db.count_files() == 0  # removed 제외
@@ -39,7 +39,7 @@ def test_quarantine_and_undo(tmp_path):
     db = Database(tmp_path / "t.db")
     fid = _add(db, str(f))
 
-    ok, failed = actions.quarantine_files(db, [fid], str(qdir))
+    ok, failed, _ = actions.quarantine_files(db, [fid], str(qdir))
     assert (ok, failed) == (1, 0)
     assert not f.exists()
     assert list(qdir.iterdir())          # 격리 폴더로 이동됨
@@ -99,7 +99,7 @@ def test_quarantine_rescan_undo_stays_visible(tmp_path):
     assert db.count_files() == 2
 
     fid = db.conn.execute("SELECT id FROM files WHERE path=?", (a,)).fetchone()["id"]
-    ok, failed = actions.quarantine_files(db, [fid], str(qdir))
+    ok, failed, _ = actions.quarantine_files(db, [fid], str(qdir))
     assert (ok, failed) == (1, 0)
     assert db.count_files() == 1  # a 는 격리되어 뷰에서 숨겨짐
 
