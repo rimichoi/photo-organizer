@@ -39,8 +39,18 @@ def _cmd_scan(args: argparse.Namespace) -> int:
         print(f"\r  발견: {n:,}개", end="", flush=True)
 
     with Database(args.db) as db:
-        count = scan_directory(db, root, progress=progress)
-    print(f"\n스캔 완료: 이미지 {count:,}개 기록 (DB: {args.db})")
+        summary = scan_directory(
+            db, root, progress=progress,
+            detect_deletions=getattr(args, "detect_deletions", False),
+        )
+    print(
+        f"\n스캔 완료: 신규 {summary['new']:,} · 변경 {summary['updated']:,} · "
+        f"무변경 {summary['unchanged']:,}"
+    )
+    if summary["deleted"] is None and getattr(args, "detect_deletions", False):
+        print("  ⚠ 삭제 감지 보류: root 하위에서 파일을 찾지 못함(드라이브 연결 확인).")
+    elif summary["deleted"] is not None:
+        print(f"  삭제(missing) 표시: {summary['deleted']:,}개")
     return 0
 
 
@@ -219,6 +229,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_scan = sub.add_parser("scan", help="디렉토리를 재귀 스캔해 이미지를 DB에 기록")
     p_scan.add_argument("path", help="스캔할 루트 경로 (로컬/네트워크 마운트)")
+    p_scan.add_argument(
+        "--detect-deletions", action="store_true",
+        help="디스크에서 사라진 파일을 감지해 missing 표시(root 하위만)",
+    )
     p_scan.set_defaults(func=_cmd_scan)
 
     p_dedup = sub.add_parser("dedup", help="완전 중복(byte 동일) 검출")
