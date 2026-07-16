@@ -23,3 +23,7 @@ models/*.onnx
 
 # OS
 .DS_Store
+
+# PyInstaller 빌드 산출물
+build/
+dist/

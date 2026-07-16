@@ -83,8 +83,10 @@ scan(디스커버리) → dedup(완전중복: 크기→빠른해시→SHA-256)
 - [x] **그룹당 최소 1장 보존**: 제거 시 그룹이 비면 대표/베스트샷 보호(`Database.protected_survivors`, actions 3-tuple 반환).
 - [x] **감사 로그 export**: CLI `report --kind actions` (CSV/JSON/콘솔).
 - [x] **EXIF 버스트 그룹핑**: 촬영시각 근접 + 완화 pHash 임계값으로 연사 묶기(`exif_dt` 컬럼, config `burst_seconds`/`burst_hamming_threshold`).
-- [ ] **PyInstaller 패키징**: Windows `.exe`, macOS `.app` 각각. spec 파일 작성 + 실행 안내.
-      (주의: onnxruntime/PySide6 3.14 조합 확인 필요. GUI만이면 PySide6 6.11로 가능)
+- [x] **PyInstaller 패키징**: `photo_organizer.spec` + `packaging/pyinstaller_entry.py`. macOS `.app` 빌드·기동·
+      `--selftest`(지연 import 포함) 검증 완료(PyInstaller 6.21, PySide6 6.11, py3.14 OK). onnxruntime은 3.14 wheel
+      없어 제외(AI 보류). Windows `.exe`는 동일 spec을 Windows에서 빌드(크로스컴파일 불가). 서명/공증·SmartScreen
+      대응은 `docs/PACKAGING.md` 참조. 남은 개선: DB/썸네일 경로를 실행 위치 → 사용자 쓰기폴더로.
 - [x] **10만 장 성능/부하 테스트**: `scripts/benchmark.py`(하이브리드 — 알고리즘은 합성 DB 100k, scan은 빈 파일 100k).
       결과(macOS py3.14): scan 0.84s · 재스캔/삭제감지 ~0.7s · protected_survivors 0.09s · report 0.09s · DB 19MB · 피크 RSS 123MB — 모두 우수.
       **병목이던 유사 클러스터링을 BK-tree→멀티인덱스 해싱으로 교체해 524s→1.6s(약 330배, 결과 불변).**
