@@ -87,6 +87,8 @@ scan(디스커버리) → dedup(완전중복: 크기→빠른해시→SHA-256)
       `--selftest`(지연 import 포함) 검증 완료(PyInstaller 6.21, PySide6 6.11, py3.14 OK). onnxruntime은 3.14 wheel
       없어 제외(AI 보류). Windows `.exe`는 동일 spec을 Windows에서 빌드(크로스컴파일 불가). 서명/공증·SmartScreen
       대응은 `docs/PACKAGING.md` 참조. 남은 개선: DB/썸네일 경로를 실행 위치 → 사용자 쓰기폴더로.
+- [x] **배포 견고성**: DB/썸네일/격리를 OS 사용자 데이터 폴더로(`core/paths.py`). 읽기전용 위치(/Applications 등) 설치 대응. GUI만 적용(CLI는 명시 경로).
+- [x] **키보드 컬링**: 그리드에서 X/Delete=격리(모달 없이, 되돌리기 가능), Enter=원본 열기, Ctrl+Z=되돌리기(`cull_requested`→`_quick_cull`).
 - [x] **10만 장 성능/부하 테스트**: `scripts/benchmark.py`(하이브리드 — 알고리즘은 합성 DB 100k, scan은 빈 파일 100k).
       결과(macOS py3.14): scan 0.84s · 재스캔/삭제감지 ~0.7s · protected_survivors 0.09s · report 0.09s · DB 19MB · 피크 RSS 123MB — 모두 우수.
       **병목이던 유사 클러스터링을 BK-tree→멀티인덱스 해싱으로 교체해 524s→1.6s(약 330배, 결과 불변).**
@@ -97,8 +99,10 @@ scan(디스커버리) → dedup(완전중복: 크기→빠른해시→SHA-256)
       결론: **초선형(O(N²)) 병목 없음** — 100k의 비용은 analyze의 이미지 디코드가 지배하며 멀티프로세싱으로
       코어 수만큼 병렬화됨(순수 CPU/드라이브 throughput 문제). 클러스터링 자체는 1.6s로 무시 수준.
       버스트 O(N²) 엣지는 `burst_max_window`(기본 200) 앵커당 상한으로 가드됨(union 전이성으로 정확성 보존).
-- [ ] 추가 개선 백로그: 유사도 슬라이더·나란히 비교 뷰·키보드 컬링·ETA·`Haar→MediaPipe` 등은
-      `docs/benchmarking-2026-07.md`(경쟁 벤치마킹, 미커밋 working note) 참조.
+- [ ] **UX 백로그(다음 세션)**: 나란히 비교 뷰 · 유사도 임계값 슬라이더(→재클러스터링) · ETA/처리량 표시 ·
+      "다음 미검토 그룹" 네비 · 베스트샷 가중치 사용자 조정. 상세는 `docs/benchmarking-2026-07.md`(미커밋 working note).
+- [ ] **AI(보류)**: `Haar→MediaPipe`(눈감음+미소, 온디바이스) → NIMA 미적점수. onnxruntime이 py3.14 wheel 없어 **py3.12 환경 필요**.
+- [ ] **배포 마무리**: Windows에서 실제 `.exe` 빌드 + 코드서명/공증(실장비 필요). 앱 아이콘.
 
 ## 6. 알아둘 점 / 함정
 
