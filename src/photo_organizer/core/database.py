@@ -245,6 +245,44 @@ class Database:
         )
         return [(r["id"], r["path"]) for r in rows]
 
+    def iter_files_for_organize(self):
+        """날짜 정리 대상 — 사용자 정리(removed)·외부 삭제(missing)분 제외."""
+        return self.conn.execute(
+            "SELECT id, path, exif_dt FROM files WHERE removed=0 AND missing=0"
+        )
+
+    def update_paths(self, rows: list[tuple[str, int]]) -> int:
+        """rows: (new_path, file_id). 이동 후 경로를 갱신하고 충돌 건수를 반환.
+
+        path 는 UNIQUE 이므로 목적 경로가 과거 스캔의 다른 행과 겹칠 수 있다.
+        - 충돌 행이 missing(유령) → 그 행과 의존 행을 지우고 갱신한다.
+        - 충돌 행이 살아있음 → 갱신을 포기하고 충돌로 집계한다. 파일은 이미
+          이동했으므로 다음 재스캔이 정리한다.
+        """
+        if not rows:
+            return 0
+        conflicts = 0
+        with self.batch() as conn:
+            for new_path, fid in rows:
+                try:
+                    conn.execute("UPDATE files SET path=? WHERE id=?", (new_path, fid))
+                    continue
+                except sqlite3.IntegrityError:
+                    pass
+                other = conn.execute(
+                    "SELECT id, missing FROM files WHERE path=?", (new_path,)
+                ).fetchone()
+                if other is None or not other["missing"]:
+                    conflicts += 1
+                    continue
+                rid = other["id"]
+                conn.execute("DELETE FROM duplicate_groups WHERE file_id=?", (rid,))
+                conn.execute("DELETE FROM similar_groups WHERE file_id=?", (rid,))
+                conn.execute("DELETE FROM action_log WHERE file_id=?", (rid,))
+                conn.execute("DELETE FROM files WHERE id=?", (rid,))
+                conn.execute("UPDATE files SET path=? WHERE id=?", (new_path, fid))
+        return conflicts
+
     def next_action_batch(self) -> int:
         row = self.conn.execute(
             "SELECT COALESCE(MAX(batch), 0) AS m FROM action_log"
