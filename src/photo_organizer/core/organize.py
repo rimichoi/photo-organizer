@@ -8,11 +8,13 @@
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass
 
+from .actions import unique_dest
 from .database import Database
 from .date_source import resolve_date
-from .platform_utils import to_nfc
+from .platform_utils import normalize_long_path, to_nfc
 
 DEFAULT_UNKNOWN_DIR = "_날짜미상"
 
@@ -54,3 +56,36 @@ def plan_organize(
             )
         )
     return plan
+
+
+def apply_organize(db: Database, plan: list[PlanItem]) -> tuple[int, int, int]:
+    """계획대로 파일을 이동한다. (이동, 건너뜀, 실패) 반환.
+
+    quarantine_files와 같은 패턴: 배치 번호 발급 → 파일 단위 예외 격리 →
+    action_log('move') 기록 → files.path 갱신. 개별 파일 오류가 전체를 막지
+    않는다(NFR-03).
+    """
+    targets = [item for item in plan if not item.skip]
+    skipped = len(plan) - len(targets)
+    if not targets:
+        return 0, skipped, 0
+
+    batch = db.next_action_batch()
+    rows: list[tuple[int, str, str, str | None]] = []
+    updates: list[tuple[str, int]] = []
+    failed = 0
+    for item in targets:
+        try:
+            os.makedirs(normalize_long_path(item.dest_dir), exist_ok=True)
+            dest = unique_dest(item.dest_dir, os.path.basename(item.src))
+            shutil.move(normalize_long_path(item.src), normalize_long_path(dest))
+        except OSError:
+            failed += 1
+            continue
+        dest = to_nfc(dest)
+        rows.append((item.file_id, "move", item.src, dest))
+        updates.append((dest, item.file_id))
+
+    db.record_actions(batch, rows)
+    conflicts = db.update_paths(updates)
+    return len(updates) - conflicts, skipped, failed + conflicts
