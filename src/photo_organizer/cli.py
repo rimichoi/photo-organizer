@@ -6,6 +6,7 @@
     photo-organizer-cli --db lib.db analyze --workers 4   # pHash+썸네일+분류
     photo-organizer-cli --db lib.db similar --threshold 5 # 유사 그룹
     photo-organizer-cli --db lib.db report --csv duplicates.csv
+    photo-organizer-cli --db lib.db organize --dest "/Volumes/NAS/정리됨" --apply
 
 Windows/macOS 공통. dedup가 multiprocessing.Pool을 쓰므로 진입점은 반드시
 ``if __name__ == "__main__"`` 가드 아래에서 호출해야 한다(spawn 안전).
@@ -15,7 +16,9 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import sys
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -25,6 +28,7 @@ from .classify.similar import cluster_similar
 from .core.config import Config
 from .core.database import Database
 from .core.hasher import find_exact_duplicates
+from .core.organize import DEFAULT_UNKNOWN_DIR, apply_organize, plan_organize
 from .core.scanner import scan_directory
 
 _DEFAULT_THUMB_DIR = "thumbnails"
@@ -253,6 +257,52 @@ def _cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+_PREVIEW_MONTHS = 12   # 미리보기에 나열할 년월 폴더 최대 개수
+_PREVIEW_SAMPLES = 10  # 미리보기에 나열할 이동 예시 최대 개수
+
+
+def _print_organize_preview(plan: list, dest: str) -> None:
+    """dry-run 요약: 출처별 집계 · 년월별 건수 · 이동 예시."""
+    targets = [p for p in plan if not p.skip]
+    sources = Counter(p.source for p in plan)
+    print(f"날짜 정리 미리보기 (dest: {dest})")
+    print(
+        f"  출처: exif {sources['exif']:,} · filename {sources['filename']:,} · "
+        f"미상 {sources['unknown']:,}"
+    )
+    print(f"  이동 대상 {len(targets):,} · 이미 정리됨 {len(plan) - len(targets):,}")
+
+    months = Counter(Path(p.dest_dir).name for p in targets)
+    for name in sorted(months)[:_PREVIEW_MONTHS]:
+        print(f"    {name}  {months[name]:,}")
+    if len(months) > _PREVIEW_MONTHS:
+        print(f"    … 외 {len(months) - _PREVIEW_MONTHS:,}개 폴더")
+
+    if targets:
+        print("  예시:")
+        for item in targets[:_PREVIEW_SAMPLES]:
+            rel = os.path.relpath(item.dest_dir, dest)
+            print(f"    {Path(item.src).name} → {rel}")
+    print("  실제로 이동하려면 --apply 를 붙이세요.")
+
+
+def _cmd_organize(args: argparse.Namespace) -> int:
+    dest = os.path.abspath(args.dest)
+    with Database(args.db) as db:
+        plan = plan_organize(db, dest, unknown_dir=args.unknown_dir)
+        if not plan:
+            print("정리할 파일이 없습니다. scan·analyze를 먼저 실행하세요.")
+            return 0
+        if not args.apply:
+            _print_organize_preview(plan, dest)
+            return 0
+        moved, skipped, failed, stale = apply_organize(db, plan)
+    print(f"정리 완료: 이동 {moved:,} · 건너뜀 {skipped:,} · 실패 {failed:,}")
+    if stale:
+        print(f"  ⚠ 이동했지만 DB 경로를 갱신하지 못함 {stale:,}개 — 재스캔이 필요합니다.")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="photo-organizer-cli",
@@ -307,6 +357,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_report.add_argument("--csv", help="CSV 출력 경로 (--kind dup|similar|actions 와 함께)")
     p_report.add_argument("--json", help="JSON 출력 경로 (--kind dup|similar|actions 와 함께)")
     p_report.set_defaults(func=_cmd_report)
+
+    p_org = sub.add_parser(
+        "organize", help="촬영 날짜 기준으로 <dest>/YYYY/YYYY-MM 폴더에 정리(이동)"
+    )
+    p_org.add_argument("--dest", required=True, help="정리 결과를 모을 대상 루트 경로")
+    p_org.add_argument(
+        "--apply", action="store_true",
+        help="실제로 이동한다 (없으면 미리보기만)",
+    )
+    p_org.add_argument(
+        "--unknown-dir", default=DEFAULT_UNKNOWN_DIR,
+        help=f"날짜 추정 실패분을 모을 폴더 이름 (기본: {DEFAULT_UNKNOWN_DIR})",
+    )
+    p_org.set_defaults(func=_cmd_organize)
 
     return parser
 

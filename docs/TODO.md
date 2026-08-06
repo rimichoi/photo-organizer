@@ -75,6 +75,10 @@
 - [x] 대표 원본 자동 추천 (완전중복: 최단 경로 / 유사: ⭐베스트샷)
 - [x] CSV/JSON 내보내기 (CLI `report --csv/--json`, 한글 BOM/UTF-8)
 - [x] 증분 재스캔 (mtime 비교로 변경/신규만, 삭제 감지)
+- [x] `core/date_source.py` — EXIF·파일명 기반 촬영 날짜 결정(오탐 방지 3규칙)
+- [x] `core/organize.py` + CLI `organize` — 촬영 날짜 기준 `<dest>/YYYY/YYYY-MM` 이동
+      (기본 dry-run, `--apply`로 실행, `_날짜미상` 폴더, move 되돌리기 지원)
+- [ ] 날짜 정리 GUI 연결 (버튼·미리보기 다이얼로그·진행률 워커)
 - [ ] PyInstaller 단일 exe(.exe)/.app 빌드 + 실행 안내
 - [ ] 10만 장 규모 성능/부하 테스트, 네트워크 끊김 복구 테스트
 
