@@ -77,3 +77,20 @@ def test_unknown_when_nothing_available():
 def test_first_valid_match_wins():
     # 앞쪽 후보가 무효(13월)면 뒤쪽 유효 후보를 쓴다.
     assert date_from_filename("20231345_20230412.jpg") == date(2023, 4, 12)
+
+
+@pytest.mark.parametrize(
+    "exif_dt",
+    [0.0, 4102444800.0, -2208988800.0],  # 1970 / 2100 / 1900
+)
+def test_out_of_range_exif_falls_back_to_filename(exif_dt):
+    # 손상된 EXIF가 파일명의 멀쩡한 날짜를 이기면 안 된다.
+    got, source = resolve_date(exif_dt, "IMG_20230412_101112.jpg")
+    assert got == date(2023, 4, 12)
+    assert source == SOURCE_FILENAME
+
+
+def test_out_of_range_exif_without_filename_date_is_unknown():
+    got, source = resolve_date(0.0, "DSC_0001.jpg")
+    assert got is None
+    assert source == SOURCE_UNKNOWN

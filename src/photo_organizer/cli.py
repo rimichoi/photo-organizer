@@ -296,8 +296,10 @@ def _cmd_organize(args: argparse.Namespace) -> int:
         if not args.apply:
             _print_organize_preview(plan, dest)
             return 0
-        moved, skipped, failed = apply_organize(db, plan)
+        moved, skipped, failed, stale = apply_organize(db, plan)
     print(f"정리 완료: 이동 {moved:,} · 건너뜀 {skipped:,} · 실패 {failed:,}")
+    if stale:
+        print(f"  ⚠ 이동했지만 DB 경로를 갱신하지 못함 {stale:,}개 — 재스캔이 필요합니다.")
     return 0
 
 

@@ -86,6 +86,11 @@ epoch으로 바꾸므로, 왕복하면 원래 촬영 시각이 그대로 복원�
 
 매치가 여러 개면 **첫 번째**를 사용한다.
 
+범위 검증은 **EXIF에도 똑같이 적용한다**. 손상된 EXIF(`0`=1970, 미래 날짜, 음수
+epoch)를 그대로 믿으면 `1970/`·`2100/` 폴더가 생기고, 음수 epoch은 Windows에서
+`datetime.fromtimestamp`가 예외를 던져 플랫폼마다 결과가 갈린다. 범위를 벗어나면
+파일명으로 폴백한다.
+
 **알려진 한계(범위 밖)**: RAW(`.CR2`/`.NEF` 등)는 `analyze`가 촬영시각을 읽지
 않는다(`image_loader.py:127` — RAW는 `dt` 없이 반환). 따라서 RAW는 파일명 경로로
 넘어가고, 파일명에도 날짜가 없으면 `_날짜미상`으로 간다. RAW EXIF 날짜 읽기는
@@ -103,7 +108,10 @@ class PlanItem:
     skip: bool           # 이미 올바른 위치에 있음
 
 plan_organize(db, dest_root: str, unknown_dir: str = "_날짜미상") -> list[PlanItem]
-apply_organize(db, plan: list[PlanItem]) -> tuple[int, int, int]   # (moved, skipped, failed)
+apply_organize(db, plan: list[PlanItem]) -> tuple[int, int, int, int]
+#   (moved, skipped, failed, stale)
+#   stale = 이동은 성공했지만 path UNIQUE 충돌로 DB 경로를 갱신하지 못한 건수.
+#           실패가 아니라 "재스캔이 필요한 상태"라 따로 센다.
 ```
 
 - 대상: `removed=0 AND missing=0` 인 모든 파일. 격리·휴지통 처리분과 유령 행 제외.
@@ -113,6 +121,13 @@ apply_organize(db, plan: list[PlanItem]) -> tuple[int, int, int]   # (moved, ski
   배치 번호 발급 → **파일 단위 `try`로 예외 격리**(NFR-03) → 디렉토리 생성 →
   `shutil.move(normalize_long_path(...))` → `action_log`에 `move` 기록 →
   `files.path` 갱신.
+- **진행분은 `_COMMIT_CHUNK`(200)마다 커밋하고, `finally`로 flush 한다.** 10만 장
+  작업은 몇 시간 걸리므로 중단(Ctrl-C = `KeyboardInterrupt`, `except OSError`에
+  걸리지 않음) 확률이 높다. 마지막에 한 번만 기록하면 이미 옮긴 파일이 로그에
+  남지 않아 되돌리기도 재개도 불가능해진다(절대원칙 2 위반). `undo_last`도 같다.
+- **낡은 계획 방어**: 이번 실행이 만들어낸 목적 경로를 기억해 두고, 뒤 항목의
+  `src`가 거기에 해당하면 건드리지 않고 실패로 집계한다. DB에 유령 행이 있고
+  `dest_root`가 스캔 루트 안일 때 방금 옮긴 파일을 다시 옮기는 사고를 막는다.
 - 이름 충돌은 `actions._unique_dest`를 재사용한다. private 이름을 모듈 밖에서 쓰지
   않도록 **`unique_dest`로 rename**하고 `actions.py`와 `organize.py`가 공유한다
   (rename 1곳, 호출부 2곳 수정).
@@ -125,7 +140,8 @@ apply_organize(db, plan: list[PlanItem]) -> tuple[int, int, int]   # (moved, ski
 2. `update_paths(rows: list[tuple[str, int]])` — 이동 후 `files.path` 갱신.
    **`path`에 UNIQUE 제약이 있다.** 목적 경로가 과거에 스캔된 다른 행과 겹칠 수
    있으므로 파일 단위로 처리한다:
-   - 충돌 행이 `missing=1`(유령) → 그 행과 의존 행(`duplicate_groups`,
+   - 충돌 행이 `missing=1`(외부 삭제) **또는 `removed=1`(격리·휴지통 처리)** →
+     그 경로에 실제 파일이 없다는 뜻이므로 그 행과 의존 행(`duplicate_groups`,
      `similar_groups`, `action_log`)을 지우고 갱신. `_migrate`의 NFC 충돌 처리와
      동일한 정리 방식을 따른다.
    - 충돌 행이 살아있음 → 해당 파일만 `failed`로 집계하고 경로는 갱신하지 않는다
@@ -139,6 +155,9 @@ apply_organize(db, plan: list[PlanItem]) -> tuple[int, int, int]   # (moved, ski
 - `move`: `to_path` → `from_path`로 되돌리고 `update_paths`로 DB 경로도 복원.
   `removed` 플래그는 애초에 건드리지 않았으므로 그대로 둔다.
 - `quarantine`: 기존 동작 유지(파일 원위치 + `mark_removed(0)`).
+- **원위치 덮어쓰기 방지**: 그 사이 원위치에 다른 파일이 생겼을 수 있으므로
+  복구 경로도 `unique_dest`를 거친다. 회피된 경우 DB 경로를 실제 복구 위치로
+  갱신한다. (없으면 사용자가 새로 넣어둔 사진이 조용히 사라진다.)
 
 기존 GUI '되돌리기' 버튼과 `Ctrl+Z`(`main_window.py:128`)는 `undo_last`를 호출하므로
 **GUI 코드 변경 없이** 날짜 정리도 되돌릴 수 있다.
@@ -168,7 +187,9 @@ photo-organizer-cli --db lib.db organize --dest /Volumes/NAS/정리됨 --apply
 | 같은 년월에 동일 파일명 | `unique_dest`로 ` (1)`, ` (2)` 부여 |
 | 이미 목적 위치에 있음 | `skip` — 파일도 DB도 건드리지 않음 |
 | DB `path` UNIQUE 충돌 | §3.3-2 규칙 |
-| 긴 경로(Windows) | `normalize_long_path` 적용 |
+| 긴 경로(Windows) | `normalize_long_path` 적용. **존재 검사(`unique_dest`)도 반드시 통과** — 접두어 없이 stat 하면 260자 초과 경로에서 파일이 있어도 False가 나와 `shutil.move`가 덮어쓴다 |
+| 작업 중 중단(Ctrl-C·전원) | 청크 커밋 + `finally` flush로 진행분 보존 → 되돌리기·재개 가능 |
+| 낡은 계획(유령 행) | 이번 실행이 만든 목적 경로는 뒤 항목의 `src`로 쓰지 않는다 |
 | `dest_root`가 스캔 루트 하위 | 정상 동작. 재실행 시 `skip`으로 걸러짐 |
 
 **비파괴성**: 완전삭제 없음. 모든 이동은 `action_log`에 남고 되돌릴 수 있다.

@@ -255,7 +255,8 @@ class Database:
         """rows: (new_path, file_id). 이동 후 경로를 갱신하고 충돌 건수를 반환.
 
         path 는 UNIQUE 이므로 목적 경로가 과거 스캔의 다른 행과 겹칠 수 있다.
-        - 충돌 행이 missing(유령) → 그 행과 의존 행을 지우고 갱신한다.
+        - 충돌 행이 missing(외부 삭제) 또는 removed(격리·휴지통 처리) → 그 경로에
+          실제 파일이 없다는 뜻이므로 그 행과 의존 행을 지우고 갱신한다.
         - 충돌 행이 살아있음 → 갱신을 포기하고 충돌로 집계한다. 파일은 이미
           이동했으므로 다음 재스캔이 정리한다.
         """
@@ -270,9 +271,9 @@ class Database:
                 except sqlite3.IntegrityError:
                     pass
                 other = conn.execute(
-                    "SELECT id, missing FROM files WHERE path=?", (new_path,)
+                    "SELECT id, missing, removed FROM files WHERE path=?", (new_path,)
                 ).fetchone()
-                if other is None or not other["missing"]:
+                if other is None or not (other["missing"] or other["removed"]):
                     conflicts += 1
                     continue
                 rid = other["id"]

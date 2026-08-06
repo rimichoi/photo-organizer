@@ -17,13 +17,21 @@ from send2trash import send2trash
 from .database import Database
 from .platform_utils import normalize_long_path, to_nfc
 
+# 대량 작업 중 중단돼도 진행분이 남도록 이 개수마다 DB에 커밋한다(재개 가능성).
+_COMMIT_CHUNK = 200
+
 
 def unique_dest(dest_dir: str, name: str) -> str:
-    """대상 폴더에서 이름 충돌 시 ' (1)', ' (2)' … 를 붙여 유일 경로 생성."""
+    """대상 폴더에서 이름 충돌 시 ' (1)', ' (2)' … 를 붙여 유일 경로 생성.
+
+    존재 검사도 반드시 normalize_long_path를 거친다. Windows에서 260자를 넘는
+    경로는 접두어 없이 stat 하면 파일이 있어도 False가 나오고, 그 경로로
+    shutil.move 하면 기존 파일을 조용히 덮어쓴다(비파괴성 위반).
+    """
     base, ext = os.path.splitext(name)
     candidate = os.path.join(dest_dir, name)
     n = 1
-    while os.path.exists(candidate):
+    while os.path.exists(normalize_long_path(candidate)):
         candidate = os.path.join(dest_dir, f"{base} ({n}){ext}")
         n += 1
     return candidate
@@ -88,27 +96,47 @@ def undo_last(db: Database) -> int:
     - move: 날짜 정리로 옮긴 파일을 원위치로 되돌리고 DB 경로도 복원한다.
       (removed 를 건드린 적이 없으므로 플래그는 그대로 둔다.)
     휴지통 작업은 OS에서 복구해야 하므로 여기서 되돌리지 않는다.
+
+    원위치에 그 사이 다른 파일이 생겼으면 덮어쓰지 않고 유일 이름으로 되돌린다.
+    복구 결과는 청크 단위로 커밋하므로, 중간에 중단돼도 지금까지의 복구가
+    DB에 남고 배치는 미완료(undone=0)로 유지돼 다시 시도할 수 있다.
     """
     batch = db.last_undoable_batch()
     if batch is None:
         return 0
     restored: list[int] = []
-    moved_back: list[tuple[str, int]] = []
-    for fid, action, from_path, to_path in db.actions_in_batch(batch):
-        if action not in ("quarantine", "move") or not to_path:
-            continue
-        if not os.path.exists(normalize_long_path(to_path)):
-            continue
-        try:
-            os.makedirs(os.path.dirname(from_path), exist_ok=True)
-            shutil.move(normalize_long_path(to_path), normalize_long_path(from_path))
-        except OSError:
-            continue
-        if action == "quarantine":
-            restored.append(fid)
-        else:
-            moved_back.append((to_nfc(from_path), fid))
-    db.mark_removed(restored, 0)
-    db.update_paths(moved_back)
+    path_updates: list[tuple[str, int]] = []
+    count = 0
+
+    def flush() -> None:
+        db.mark_removed(restored, 0)
+        db.update_paths(path_updates)
+        restored.clear()
+        path_updates.clear()
+
+    try:
+        for fid, action, from_path, to_path in db.actions_in_batch(batch):
+            if action not in ("quarantine", "move") or not to_path:
+                continue
+            if not os.path.exists(normalize_long_path(to_path)):
+                continue
+            try:
+                os.makedirs(os.path.dirname(from_path), exist_ok=True)
+                target = unique_dest(
+                    os.path.dirname(from_path), os.path.basename(from_path)
+                )
+                shutil.move(normalize_long_path(to_path), normalize_long_path(target))
+            except OSError:
+                continue
+            count += 1
+            target = to_nfc(target)
+            if action == "quarantine":
+                restored.append(fid)
+            if action == "move" or target != to_nfc(from_path):
+                path_updates.append((target, fid))
+            if len(restored) + len(path_updates) >= _COMMIT_CHUNK:
+                flush()
+    finally:
+        flush()
     db.mark_batch_undone(batch)
-    return len(restored) + len(moved_back)
+    return count

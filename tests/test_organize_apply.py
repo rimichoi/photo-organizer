@@ -26,10 +26,10 @@ def test_apply_moves_file_and_updates_db(tmp_path):
     src = str(tmp_path / "src" / "a.jpg")
     fid = _make(db, src)
 
-    moved, skipped, failed = apply_organize(db, plan_organize(db, dest))
+    moved, skipped, failed, stale = apply_organize(db, plan_organize(db, dest))
 
     expected = os.path.join(dest, "2023", "2023-04", "a.jpg")
-    assert (moved, skipped, failed) == (1, 0, 0)
+    assert (moved, skipped, failed, stale) == (1, 0, 0, 0)
     assert os.path.exists(expected)
     assert not os.path.exists(src)
     assert db.conn.execute("SELECT path FROM files WHERE id=?",
@@ -59,7 +59,7 @@ def test_name_collision_gets_suffix(tmp_path):
     _make(db, str(tmp_path / "src1" / "a.jpg"), b"one")
     _make(db, str(tmp_path / "src2" / "a.jpg"), b"two")
 
-    moved, _, failed = apply_organize(db, plan_organize(db, dest))
+    moved, _, failed, stale = apply_organize(db, plan_organize(db, dest))
 
     month = os.path.join(dest, "2023", "2023-04")
     assert (moved, failed) == (2, 0)
@@ -73,9 +73,9 @@ def test_rerun_is_idempotent(tmp_path):
     _make(db, str(tmp_path / "src" / "a.jpg"))
     apply_organize(db, plan_organize(db, dest))
 
-    moved, skipped, failed = apply_organize(db, plan_organize(db, dest))
+    moved, skipped, failed, stale = apply_organize(db, plan_organize(db, dest))
 
-    assert (moved, skipped, failed) == (0, 1, 0)
+    assert (moved, skipped, failed, stale) == (0, 1, 0, 0)
     month = os.path.join(dest, "2023", "2023-04")
     assert os.listdir(month) == ["a.jpg"]
     db.close()
@@ -91,7 +91,7 @@ def test_missing_source_counts_as_failed(tmp_path):
     plan = plan_organize(db, dest)
     os.remove(doomed)
 
-    moved, _, failed = apply_organize(db, plan)
+    moved, _, failed, stale = apply_organize(db, plan)
 
     assert (moved, failed) == (1, 1)
     assert os.path.exists(os.path.join(dest, "2023", "2023-04", "ok.jpg"))
