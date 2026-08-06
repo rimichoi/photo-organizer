@@ -44,8 +44,8 @@ photo-organizer/
 **Phase 1~4 완료, Phase 5 안전 작업 핵심 완료.** 현재 상태·환경·남은 작업은
 반드시 `docs/HANDOFF.md`를 먼저 읽으세요. 세부 체크리스트는 `docs/TODO.md`.
 
-남은 작업(Phase 5 마감): 증분 재스캔(mtime) · PyInstaller 패키징(.exe/.app) ·
-10만 장 성능/부하 테스트.
+남은 작업(Phase 5 마감): PyInstaller 패키징(.exe/.app) · 10만 장 성능/부하 테스트 ·
+날짜 정리 GUI 연결(CLI `organize`는 완료).
 
 ⚠️ 실행/테스트는 시스템 Python(3.9)이 아니라 **`.venv`(zerobrew python@3.14)** 로:
 `PYTHONPATH=src .venv/bin/python -m pytest` / `... -m photo_organizer.gui.app`.

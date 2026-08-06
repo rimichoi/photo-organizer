@@ -13,7 +13,7 @@
 | Phase 4 — GUI (PySide6) | ✅ 완료 | 메인윈도우 · 워커 · 그룹 그리드 · 상세 패널 · UX |
 | Phase 5 — 안전 작업 | 🟡 핵심 완료 | 휴지통/격리 이동 · 되돌리기 · CSV/JSON |
 
-**테스트: 68개 전부 통과.** (`docs/TODO.md`에 항목별 체크 상세)
+**테스트: 157개 전부 통과.** (`docs/TODO.md`에 항목별 체크 상세)
 
 ## 2. 개발 환경 (중요 — 추측 금지)
 
@@ -36,6 +36,8 @@ PYTHONPATH=src .venv/bin/python -m photo_organizer.cli --db lib.db similar
 PYTHONPATH=src .venv/bin/python -m photo_organizer.cli --db lib.db bestshot
 PYTHONPATH=src .venv/bin/python -m photo_organizer.cli --db lib.db report            # 콘솔
 PYTHONPATH=src .venv/bin/python -m photo_organizer.cli --db lib.db report --kind similar --json out.json
+PYTHONPATH=src .venv/bin/python -m photo_organizer.cli --db lib.db organize --dest <경로>          # 미리보기
+PYTHONPATH=src .venv/bin/python -m photo_organizer.cli --db lib.db organize --dest <경로> --apply  # 실제 이동
 # GUI (사용자 Mac 화면에 창)
 PYTHONPATH=src .venv/bin/python -m photo_organizer.gui.app
 # 샘플 사진 재생성 (테스트용, 한글 폴더 17장)
@@ -52,6 +54,7 @@ PYTHONPATH=src .venv/bin/python scripts/make_sample_photos.py sample_photos
 scan(디스커버리) → dedup(완전중복: 크기→빠른해시→SHA-256)
  → analyze(read-once: pHash+썸네일+규칙분류 동시) → similar(BK-tree+union-find)
  → bestshot(품질 가중합, 그룹별 ⭐) → GUI 검토 → 안전 정리(휴지통/격리)
+ → organize(촬영 날짜 기준 YYYY/YYYY-MM 이동, 되돌리기 가능)
 ```
 - 저장소: SQLite(WAL). 모든 진행 상태 DB 기록 → 재개 가능.
 - 코어(`src/photo_organizer/core/`): database, scanner, hasher, image_loader,
