@@ -343,10 +343,10 @@ class Database:
         return out
 
     def last_undoable_batch(self) -> int | None:
-        """되돌릴 수 있는 가장 최근 배치(격리 이동). 휴지통은 OS에서 복구."""
+        """되돌릴 수 있는 가장 최근 배치(격리 이동·날짜 정리). 휴지통은 OS에서 복구."""
         row = self.conn.execute(
             "SELECT MAX(batch) AS b FROM action_log "
-            "WHERE undone=0 AND action='quarantine'"
+            "WHERE undone=0 AND action IN ('quarantine', 'move')"
         ).fetchone()
         return row["b"]
 

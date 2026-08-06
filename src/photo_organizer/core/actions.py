@@ -15,7 +15,7 @@ import shutil
 from send2trash import send2trash
 
 from .database import Database
-from .platform_utils import normalize_long_path
+from .platform_utils import normalize_long_path, to_nfc
 
 
 def unique_dest(dest_dir: str, name: str) -> str:
@@ -82,25 +82,33 @@ def quarantine_files(
 
 
 def undo_last(db: Database) -> int:
-    """되돌릴 수 있는 가장 최근 배치(격리 이동)를 원위치로 복구한다. 복구 수 반환.
+    """되돌릴 수 있는 가장 최근 배치를 원위치로 복구한다. 복구 수 반환.
 
+    - quarantine: 격리 폴더에서 원위치로 되돌리고 removed 플래그를 해제한다.
+    - move: 날짜 정리로 옮긴 파일을 원위치로 되돌리고 DB 경로도 복원한다.
+      (removed 를 건드린 적이 없으므로 플래그는 그대로 둔다.)
     휴지통 작업은 OS에서 복구해야 하므로 여기서 되돌리지 않는다.
     """
     batch = db.last_undoable_batch()
     if batch is None:
         return 0
     restored: list[int] = []
+    moved_back: list[tuple[str, int]] = []
     for fid, action, from_path, to_path in db.actions_in_batch(batch):
-        if action != "quarantine" or not to_path:
+        if action not in ("quarantine", "move") or not to_path:
             continue
         if not os.path.exists(normalize_long_path(to_path)):
             continue
         try:
             os.makedirs(os.path.dirname(from_path), exist_ok=True)
             shutil.move(normalize_long_path(to_path), normalize_long_path(from_path))
-            restored.append(fid)
         except OSError:
             continue
+        if action == "quarantine":
+            restored.append(fid)
+        else:
+            moved_back.append((to_nfc(from_path), fid))
     db.mark_removed(restored, 0)
+    db.update_paths(moved_back)
     db.mark_batch_undone(batch)
-    return len(restored)
+    return len(restored) + len(moved_back)
