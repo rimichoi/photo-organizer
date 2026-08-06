@@ -18,8 +18,8 @@ from .database import Database
 from .platform_utils import normalize_long_path
 
 
-def _unique_dest(dest_dir: str, name: str) -> str:
-    """격리 폴더에서 이름 충돌 시 ' (1)', ' (2)' … 를 붙여 유일 경로 생성."""
+def unique_dest(dest_dir: str, name: str) -> str:
+    """대상 폴더에서 이름 충돌 시 ' (1)', ' (2)' … 를 붙여 유일 경로 생성."""
     base, ext = os.path.splitext(name)
     candidate = os.path.join(dest_dir, name)
     n = 1
@@ -70,7 +70,7 @@ def quarantine_files(
     failed = 0
     for fid, path in db.paths_for_ids(targets):
         try:
-            dest = _unique_dest(quarantine_dir, os.path.basename(path))
+            dest = unique_dest(quarantine_dir, os.path.basename(path))
             shutil.move(normalize_long_path(path), normalize_long_path(dest))
             rows.append((fid, "quarantine", path, dest))
             done.append(fid)

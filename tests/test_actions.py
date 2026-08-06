@@ -2,7 +2,7 @@
 import os
 
 from photo_organizer.core import actions
-from photo_organizer.core.actions import _unique_dest
+from photo_organizer.core.actions import unique_dest
 from photo_organizer.core.database import Database
 from photo_organizer.core.scanner import scan_directory
 
@@ -71,7 +71,7 @@ def test_trash_excludes_from_views(tmp_path, monkeypatch):
 
 def test_unique_dest_collision(tmp_path):
     (tmp_path / "x.jpg").write_bytes(b"1")
-    dest = _unique_dest(str(tmp_path), "x.jpg")
+    dest = unique_dest(str(tmp_path), "x.jpg")
     assert dest.endswith("x (1).jpg")
 
 
